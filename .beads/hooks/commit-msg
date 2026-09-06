@@ -1,0 +1,42 @@
+#!/usr/bin/env sh
+# commit-msg — enforce a conventional-commit type on the subject line.
+#
+# PRIMARY, local, instant layer (bead ccp-arxk). Installed GLOBALLY via
+# core.hooksPath (see scripts/tool-install-hooks.sh) so one install covers every
+# repo. The commit-lint job in .github/workflows/gate.yml independently
+# validates the commits on a pushed branch and on every PR.
+#
+# ‡ CI does not PREVENT bad history — it observes it. Nothing stops a
+# `--no-verify` commit or a direct push to main until a branch ruleset requires
+# the commit-lint check, and `main` in this repo carries no protection today
+# (`gh api repos/:owner/:repo/branches/main/protection` → 404). Do not upgrade
+# the claim in this comment without upgrading the ruleset first (sd-edki).
+#
+# This file holds NO rule of its own. The vocabulary, the regex and the
+# exemptions live in lint-commit-subject.sh, installed beside this hook; every
+# other enforcement point calls that same script.
+set -eu
+
+msg_file="${1:-}"
+if [ -z "$msg_file" ]; then
+  printf 'usage: commit-msg <commit-msg-file>\n' >&2
+  exit 1
+fi
+
+linter="$(dirname "$0")/lint-commit-subject.sh"
+if [ ! -f "$linter" ]; then
+  # Unavailable is not clean (.claude/rules/standard-checks.md). A missing
+  # sibling means a broken install, not a good subject — but a commit-msg hook
+  # that hard-failed here would break every commit in every repo on this
+  # machine, so it says so IN BAND and lets the commit through.
+  #   repair: bash <sdlc>/scripts/tool-install-hooks.sh
+  printf 'GATE-NOT-MEASURED: commit-msg found no linter at %s — subject unchecked.\n' "$linter" >&2
+  exit 0
+fi
+
+if sh "$linter" --file "$msg_file"; then
+  exit 0
+fi
+
+printf '\nFix the message, or bypass with --no-verify (commit-lint still flags it on push).\n' >&2
+exit 1

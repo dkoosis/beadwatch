@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# pre-commit — the shared-checkout commit guard: a child session's commit on a
+# shared checkout's default branch goes through only when every path in it is
+# exclusively locked by that session in loto (sd-hmqi; the rule is sd-2hq's).
+#
+# guard-marker: sdlc pre-commit guard (sd-hmqi)
+#   home/hooks/gate-shared-checkout.sh greps that line to decide the guard is
+#   reachable before it lets a shared-main commit run at all.
+#
+# WHY A GIT HOOK, NOT THE CLAUDE-SIDE GATE. gate-shared-checkout.sh used to learn
+# what a commit would touch by re-parsing the Bash command string, and was
+# patched four times for it (sd-2hq escape · sd-3wp.11 and sd-6hj quoting ·
+# sd-20w3 identity) before the fifth defect — a `;` inside the -m message — was
+# filed. Git already knows the set. By the time pre-commit runs,
+# `git diff --cached --name-only` IS what will be committed, for every shape:
+# measured 2026-09-02 in a scratch repo, `commit -- a c` with a peer's b staged
+# → "a c"; a plain commit → "b"; `commit -a` → the edited file. And the
+# committer's identity is in this process's env: the agent's Bash call carries
+# CLAUDE_CODE_SESSION_ID and git hands its env to hooks — the shape the Claude-
+# side hook never had, since Claude Code sets no session var for a hook
+# subprocess (sd-20w3).
+#
+# PASSES untouched: the main session (CLAUDE_CODE_CHILD_SESSION unset — dk is
+# exempt structurally, not by override), a repo outside $HOME/Projects
+# (override: SHARED_MAIN_GUARD_ROOT), a linked worktree or anything under
+# .claude/worktrees/, a non-default branch, a detached HEAD, SHARED_MAIN_GUARD_OFF=1.
+#
+# REFUSES (exit 1, the reason on the first stderr line): loto not on PATH · no
+# session id · an empty set (an --amend or --allow-empty with nothing held is a
+# HEAD rewrite with no scope) · any path not exclusively and live-locked by this
+# session. Every failure to look is a refusal, never a pass
+# (.claude/rules/standard-checks.md: unavailable is not clean).
+#
+# REACH. scripts/tool-install-hooks.sh installs this file into the global
+# core.hooksPath, and every sibling repo shadows that dir (.beads/hooks,
+# .githooks, .git/hooks — measured 2026-09-02), so the installer also chains it
+# into a shadowing dir (`--repo <dir>` for another repo). The Claude-side gate
+# refuses a shared-main commit unless it can see this guard through that chain,
+# so a repo where this never runs is a refused commit, not a silent pass.
+#
+# Test: bash githooks/pre-commit.test.sh — real loto, real `git commit`.
+set -u
+
+[ "${CLAUDE_CODE_CHILD_SESSION:-0}" = "1" ] || exit 0
+[ "${SHARED_MAIN_GUARD_OFF:-0}" = "1" ] && exit 0
+
+ROOT="${SHARED_MAIN_GUARD_ROOT:-$HOME/Projects}"
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+top=$(cd "$top" 2>/dev/null && pwd -P) || exit 0
+case "$top" in "$ROOT"/*) ;; *) exit 0 ;; esac
+case "$top" in */.claude/worktrees/*) exit 0 ;; esac
+gd=$(git rev-parse --git-dir 2>/dev/null) || exit 0
+cgd=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+[ "$gd" = "$cgd" ] || exit 0
+br=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || exit 0
+def=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+def="${def#origin/}"
+if [ -z "$def" ]; then
+  if git show-ref --verify -q refs/heads/main 2>/dev/null; then def=main
+  elif git show-ref --verify -q refs/heads/master 2>/dev/null; then def=master
+  else exit 0
+  fi
+fi
+[ "$br" = "$def" ] || exit 0
+
+# sd-g1yk / sd-urac: the refusal LEADS with the one command to run, then the
+# reason, then everything else. The old text opened with the reason and put
+# `loto lock … then retry` first in a run-on ways-through line, so the route
+# that cannot open a PR was read before the one that can — the same inversion
+# gate-session-close.sh carried (sd-8jqo). tool-ship.sh is the whole route from
+# a shared checkout: it takes a worktree, carries the named files into it,
+# restores this checkout, and opens the PR from there, with no further refusal
+# and no override (sd-p6rt). `loto lane` is kept, labelled by what it produces.
+refuse() {
+  printf 'pre-commit guard: refusing this commit on shared %s.\n' "$br" >&2
+  printf '  run this: bash "${CLAUDE_PLUGIN_ROOT}/scripts/tool-ship.sh" -m "<type>: <summary>" --closes "<ids>|none" <path>...\n' >&2
+  printf '    one call is the whole route from here, with no further refusal and no override (sd-p6rt): it takes a worktree, carries the files you name into it, restores this checkout, and opens the PR from there.\n' >&2
+  printf '  why refused: %s\n' "$1" >&2
+  printf '  other ways through, none of which open a PR:\n' >&2
+  printf '    · loto lane <files> --ref <bead> --base "$(git rev-parse %s)" -m "<subject>" — a COMMIT, not a PR: it writes an exact write-set to refs/heads/loto/<bead> by plumbing, so it leaves a commit ref and no review.\n' "$br" >&2
+  printf '    · loto lock <files> -t "<why>" (exclusive), then retry this commit — commits on %s, still no PR.\n' "$br" >&2
+  printf '    · a worktree under .claude/worktrees/\n' >&2
+  printf '    · SHARED_MAIN_GUARD_OFF=1 (dk'"'"'s call, not an agent'"'"'s)\n' >&2
+  exit 1
+}
+
+command -v loto >/dev/null 2>&1 || refuse "loto not on PATH, so no lock can be checked"
+[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || refuse "no session id in the env (CLAUDE_CODE_SESSION_ID), so no lock can be yours"
+
+# The set git is about to commit — the pathspec's paths, the index, or the -a
+# sweep, whichever this commit is. -z so a path with spaces stays one path;
+# --no-renames so a rename shows both its old and its new path.
+paths=()
+while IFS= read -r -d '' p; do paths+=("$p"); done \
+  < <(git diff --cached --name-only --no-renames -z 2>/dev/null)
+[ "${#paths[@]}" -ge 1 ] || refuse "nothing in this commit is held: the set is empty"
+
+# Repo-relative targets this session holds exclusively, live. Same read as
+# loto's own status line: mode=exclusive, not liveness=dead, ttl still running.
+held=$(loto status --mine 2>/dev/null | awk '/mode=exclusive/ && !/liveness=dead/ {
+  t=""; ttl=1;
+  for (i = 1; i <= NF; i++) {
+    if ($i ~ /^target=/)        { t = substr($i, 8) }
+    if ($i ~ /^ttl_remaining=/) { ttl = substr($i, 15) + 0 }
+  }
+  if (t != "" && ttl > 0) print t
+}')
+for p in "${paths[@]}"; do
+  ok=0
+  while IFS= read -r h; do [ "$h" = "$p" ] && { ok=1; break; }; done <<<"$held"
+  [ "$ok" -eq 1 ] || refuse "$p is not exclusively locked by this session (loto lock $p -t \"<why>\")"
+done
+exit 0
+
+# --- BEGIN BEADS INTEGRATION v1.2.2 ---
+# This section is managed by beads. Do not remove these markers.
+if command -v bd >/dev/null 2>&1; then
+  export BD_GIT_HOOK=1
+  _bd_timeout=${BEADS_HOOK_TIMEOUT:-300}
+  _bd_used_perl=0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$_bd_timeout" bd hooks run pre-commit "$@"
+    _bd_exit=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$_bd_timeout" bd hooks run pre-commit "$@"
+    _bd_exit=$?
+  elif command -v perl >/dev/null 2>&1; then
+    _bd_used_perl=1
+    perl -e 'alarm shift; exec @ARGV' "$_bd_timeout" bd hooks run pre-commit "$@"
+    _bd_exit=$?
+  else
+    echo >&2 "beads: hook 'pre-commit' running without timeout; install coreutils or perl to enable BEADS_HOOK_TIMEOUT"
+    bd hooks run pre-commit "$@"
+    _bd_exit=$?
+  fi
+  if [ $_bd_exit -eq 124 ] || { [ $_bd_used_perl -eq 1 ] && [ $_bd_exit -eq 142 ]; }; then
+    echo >&2 "beads: hook 'pre-commit' timed out after ${_bd_timeout}s — continuing without beads"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -eq 3 ]; then
+    echo >&2 "beads: database not initialized — skipping hook 'pre-commit'"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
+fi
+# --- END BEADS INTEGRATION v1.2.2 ---

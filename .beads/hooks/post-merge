@@ -1,0 +1,103 @@
+#!/usr/bin/env sh
+# post-merge — sync a marketplace repo's plugin cache the instant local main
+# actually changes: a real merge, or a `git pull` (fetch+merge fires this too).
+#
+# WHY THIS EXISTS (sd-q61). The ritual's step 4 (the sync script — tool-dev-sync.sh
+# or dev-sync.sh) already runs at Claude Code SessionStart, but that fires once
+# per session and explicitly skips on /clear (the sync script's own
+# hook_input.source check) — so a session that lives across several merged
+# PRs, the fleet's normal day, never re-triggers it. `make check` on main read
+# check-wiring red for hours at a
+# stretch (four merges, four by-hand dev-sync runs, same day) because nothing
+# fired between them. Worse than the red gate: a LIVE session loads the stale
+# cache in the meantime — running `make check` never causes that load, only a
+# session start does, so the fix has to sit at the moment the tree actually
+# changes, not at the moment someone happens to run the gate.
+#
+# `make check`'s check-wiring KEEPS FAILING on a stale cache rather than
+# repairing itself (see Makefile's check-wiring comment) — this hook is what
+# should make that failure vanishingly rare. If it still fires, that means
+# tool-install-hooks.sh hasn't been run on this machine, and having the gate
+# silently repair itself would hide exactly that signal.
+#
+# Installed GLOBALLY via core.hooksPath (see scripts/tool-install-hooks.sh) beside
+# commit-msg/pre-push, so one install covers every repo. Repo-generic and
+# double-guarded:
+#   · not a marketplace repo (no marketplace.json + a sync script) → no-op
+#   · a linked worktree, not the durable main checkout                  → no-op
+#     (an agent's worktree can be mid-feature-branch; auto-syncing THAT
+#     content into the shared cache would ship half-finished work to dk's
+#     live sessions — the one failure mode worse than staying stale)
+#   · not currently on the repo's default branch                       → no-op
+#
+# ccp-n6rz: the sync script's name is not fixed to one spelling — sdlc carries
+# tool-dev-sync.sh, cc-plugins carries dev-sync.sh — and this hook hardcoded
+# the former, so it silently no-op'd on every repo shaped like the latter.
+# tool-ship-plugin.sh already treats both names as equivalent; mirrored here so
+# a repo missing one gets the other instead of nothing.
+set -eu
+
+root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$root" ] || exit 0
+
+sync=""
+for cand in "$root/scripts/tool-dev-sync.sh" "$root/scripts/dev-sync.sh"; do
+  [ -f "$cand" ] && { sync="$cand"; break; }
+done
+manifest="$root/.claude-plugin/marketplace.json"
+[ -n "$sync" ] && [ -f "$manifest" ] || exit 0   # not a marketplace repo — nothing to sync.
+
+# Never fire inside a linked worktree — same hazard tool-install-hooks.sh guards
+# against when wiring the SessionStart command, same fix: compare against
+# git-common-dir's parent, the one durable checkout. pwd -P on both sides:
+# macOS resolves /var → /private/var, and skipping that makes every worktree
+# look like the main checkout.
+common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [ -n "$common" ]; then
+  main_root="$(cd "$(dirname "$common")" && pwd -P)"
+  here="$(cd "$root" && pwd -P)"
+  [ "$here" = "$main_root" ] || exit 0
+fi
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+default_ref=""
+for r in main master; do
+  if git rev-parse --verify --quiet "$r" >/dev/null 2>&1; then default_ref="$r"; break; fi
+done
+[ -n "$default_ref" ] && [ "$branch" = "$default_ref" ] || exit 0
+
+printf 'post-merge: syncing plugin cache via %s\n' "${sync#"$root"/}" >&2
+bash "$sync" || true   # dev-sync reports its own errors; never block a merge/pull on a sync hiccup.
+
+# --- BEGIN BEADS INTEGRATION v1.2.2 ---
+# This section is managed by beads. Do not remove these markers.
+if command -v bd >/dev/null 2>&1; then
+  export BD_GIT_HOOK=1
+  _bd_timeout=${BEADS_HOOK_TIMEOUT:-300}
+  _bd_used_perl=0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$_bd_timeout" bd hooks run post-merge "$@"
+    _bd_exit=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$_bd_timeout" bd hooks run post-merge "$@"
+    _bd_exit=$?
+  elif command -v perl >/dev/null 2>&1; then
+    _bd_used_perl=1
+    perl -e 'alarm shift; exec @ARGV' "$_bd_timeout" bd hooks run post-merge "$@"
+    _bd_exit=$?
+  else
+    echo >&2 "beads: hook 'post-merge' running without timeout; install coreutils or perl to enable BEADS_HOOK_TIMEOUT"
+    bd hooks run post-merge "$@"
+    _bd_exit=$?
+  fi
+  if [ $_bd_exit -eq 124 ] || { [ $_bd_used_perl -eq 1 ] && [ $_bd_exit -eq 142 ]; }; then
+    echo >&2 "beads: hook 'post-merge' timed out after ${_bd_timeout}s — continuing without beads"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -eq 3 ]; then
+    echo >&2 "beads: database not initialized — skipping hook 'post-merge'"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
+fi
+# --- END BEADS INTEGRATION v1.2.2 ---
