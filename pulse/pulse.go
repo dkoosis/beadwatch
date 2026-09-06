@@ -104,6 +104,9 @@ func laneOf(status Status, gated, hasBlocker bool) Lane {
 			return LaneBlocked
 		}
 		return LaneOpen
+	case StatusClosed, StatusDeferred:
+		// unreachable — the guard above already returns for these; named here
+		// only so the switch is exhaustive over Status.
 	}
 	return LaneNone // unknown/future status — defensive
 }

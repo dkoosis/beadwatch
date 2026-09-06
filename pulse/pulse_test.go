@@ -85,6 +85,8 @@ func TestPartitionSumsToLiveBeads(t *testing.T) {
 		switch issues[i].Status {
 		case StatusOpen, StatusInProgress, StatusBlocked:
 			wantTotal++
+		case StatusClosed, StatusDeferred:
+			// not live work — excluded from wantTotal
 		}
 	}
 

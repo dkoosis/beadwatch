@@ -1,0 +1,244 @@
+# Strict lint for beadwatch, copied from ../strand/.golangci.yml (bw-ajp) so
+# the two repos grade the same way. depguard arch rules omitted for the same
+# reason strand omits them — the package graph isn't worth fencing yet.
+version: "2"
+
+run:
+  modules-download-mode: readonly
+  tests: true
+
+linters:
+  # bugclasses baseline floor (ccp-sbp.2, decision nug d7ea466a8172): keep
+  # golangci's standard set (errcheck, govet, ineffassign, staticcheck, unused)
+  # under everything strand — and now beadwatch — enables on top.
+  default: standard
+
+  enable:
+    # Error handling
+    - err113
+    - errchkjson
+    - errorlint
+    - nilerr
+    - nilnesserr
+    - staticcheck    # floor: the SA correctness suite, named explicitly
+    - wrapcheck
+
+    # Safety
+    - bodyclose
+    - containedctx
+    - forcetypeassert
+    - forbidigo
+    - gosec
+    - noctx
+    - predeclared
+    - rowserrcheck
+    - sqlclosecheck
+
+    # Complexity
+    - cyclop
+    - funlen
+    - gocognit
+    - gocyclo
+    - nestif
+
+    # Enum & type safety
+    - exhaustive
+    - makezero
+    - musttag
+    - reassign
+
+    # Style & correctness
+    - asciicheck
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errname
+    - exptostd
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - grouper
+    - inamedparam
+    - intrange
+    - iotamixing
+    - loggercheck
+    - misspell
+    - modernize
+    - nakedret
+    - nilnil
+    - nolintlint
+    - prealloc
+    - recvcheck
+    - revive
+    - sloglint
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+
+    # Performance
+    - mirror
+    - perfsprint
+
+    # Testing
+    - testifylint
+    - thelper
+    - usetesting
+
+  disable:
+    - godox
+    - wsl
+
+  settings:
+    wrapcheck:
+      # cachingSource transparently decorates the IssueSource interface; its
+      # passthrough/memoize methods return the underlying error as-is (already
+      # surfaced at the bd boundary). Re-wrapping a same-interface decorator
+      # would only double-prefix, so exempt the decorated interface.
+      ignore-interface-regexps:
+        - IssueSource
+    errcheck:
+      # STRICT (baseline floor): only calls whose dropped error is genuinely
+      # discardable — a Close on a read handle, a printer to a known-good
+      # writer. Never a path/package blanket.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - fmt.Fprintf
+        - fmt.Printf
+        - fmt.Print
+        - fmt.Println
+        - fmt.Fprint
+        - fmt.Fprintln
+    goconst:
+      min-len: 4
+      min-occurrences: 5
+      ignore-tests: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      # bugclasses pack (ccp-sbp, decision nug d7ea466a8172): the ruleguard
+      # checker runs the shared machine rules for the recurring cross-repo Go
+      # defect classes. Rules live in .golangci-rules/bugclasses.go — a verbatim
+      # copy of the upstream pack, drift-guarded by scripts/check-pack-drift.sh
+      # in strand; beadwatch carries the same copy without the drift script
+      # (bw-ajp scope: the gate, not the drift-check tooling).
+      enabled-checks:
+        - ruleguard
+      settings:
+        ruleguard:
+          # ${base-path} = the .golangci.yml directory (golangci-lint v2). The
+          # glob names ONLY bugclasses.go, so rule 2 (raw-state-write, the
+          # opt-in file) stays off — beadwatch hasn't moved durable state to
+          # atomicfile's write path either.
+          rules: "${base-path}/.golangci-rules/bugclasses.go"
+          # Fail the run on rule-compile errors — never silently skip them.
+          failOn: dsl
+      disabled-checks:
+        - commentFormatting
+        - ifElseChain
+    forbidigo:
+      # bugclasses rule 5: context.Background() deep in daemon code should
+      # thread the caller/shutdown ctx. beadwatch has no long-lived daemon
+      # package (internal/counts runs a one-shot CLI, not a server), but the
+      # rule is kept enabled at strand's default scope (analyze-types, no
+      # path restriction beyond the exclusions below) so a future daemon
+      # package inherits the ban rather than needing it re-added.
+      analyze-types: true
+      forbid:
+        - pattern: '^context\.Background$'
+          msg: "thread the caller/shutdown ctx; context.Background belongs only at a daemon's root (main/startup)"
+    cyclop:
+      max-complexity: 15
+    funlen:
+      lines: 80
+      statements: 40
+    gocognit:
+      min-complexity: 15
+    gocyclo:
+      min-complexity: 15
+    nestif:
+      min-complexity: 5
+    nakedret:
+      max-func-lines: 20
+    revive:
+      severity: warning
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: bare-return
+          disabled: true
+        - name: var-naming
+          disabled: false
+        - name: context-as-argument
+          disabled: false
+        - name: error-return
+          disabled: false
+        - name: dot-imports
+          disabled: false
+        - name: waitgroup-by-value
+          disabled: false
+    staticcheck:
+      checks:
+        - all
+    testifylint:
+      enable-all: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      # bd nests worktrees inside the repo (beadwatch-4fj/, beadwatch-alg.2/,
+      # …); each carries a copy of go.mod, so don't lint them as part of this
+      # module. (Renamed from strand's own prefix; same convention.)
+      - (^|/)beadwatch-[^/]+/
+    rules:
+      # Test files: relax security, complexity, context, and wrapping.
+      - linters:
+          - gosec
+          - cyclop
+          - funlen
+          - gocognit
+          - gocyclo
+          - nestif
+          - noctx
+          - unparam
+          - wrapcheck
+        path: _test\.go
+      # cmd main.go: relax complexity; defer-in-main is idiomatic.
+      - linters:
+          - cyclop
+          - funlen
+          - gocognit
+          - gocyclo
+          - nestif
+        path: cmd/.*/main\.go
+      - linters:
+          - gocritic
+        path: cmd/.*/main\.go
+        text: exitAfterDefer
+      # bugclasses rule 5 (forbidigo Background ban) is noise everywhere except
+      # long-lived daemon packages. context.Background is legitimate at
+      # beadwatch's root (cmd/beadwatch startup) and in tests.
+      - linters:
+          - forbidigo
+        path: '(_test\.go$|/cmd/|(^|/)main\.go$)'
+        text: 'context\.Background'
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
