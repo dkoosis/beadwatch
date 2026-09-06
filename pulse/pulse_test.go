@@ -6,6 +6,13 @@ import "testing"
 // table (~/Projects/kg/Project/beadwatch/specs/beadwatch-design.md), "after"
 // column — decision 477486825755: gated beats blocked beats open/in-progress,
 // whatever the status or dependencies.
+//
+// The last two rows are not in that table: they pin the not-live guard that
+// runs BEFORE the gate check. "Human wins every overlap" is bounded by being
+// live — a closed or deferred bead is LaneNone even when it carries the human
+// label and an unmet blocker, so a gated bead that gets closed leaves the
+// waiting lane instead of parking there forever. Without these rows the
+// short-circuit is only reached incidentally, through TestPartitionSumsToLiveBeads.
 func TestLaneOfDerivationTable(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -19,6 +26,8 @@ func TestLaneOfDerivationTable(t *testing.T) {
 		{"open, open dependency -> bb", StatusOpen, false, true, LaneBlocked},
 		{"in_progress, no label -> bw", StatusInProgress, false, false, LaneInProgress},
 		{"open, plain -> bo", StatusOpen, false, false, LaneOpen},
+		{"closed, human label, open dependency -> not live", StatusClosed, true, true, LaneNone},
+		{"deferred, human label -> not live", StatusDeferred, true, false, LaneNone},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
