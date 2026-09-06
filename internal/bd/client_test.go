@@ -115,8 +115,8 @@ func TestDecodeIssuePriority(t *testing.T) {
 		want *int
 	}{
 		{name: "present zero is P0", json: `[{"id":"a-1","priority":0}]`, want: new(int)},
-		{name: "present nonzero round-trips", json: `[{"id":"a-2","priority":2}]`, want: intp(2)},
-		{name: "present highest boundary", json: `[{"id":"a-3","priority":4}]`, want: intp(4)},
+		{name: "present nonzero round-trips", json: `[{"id":"a-2","priority":2}]`, want: new(2)},
+		{name: "present highest boundary", json: `[{"id":"a-3","priority":4}]`, want: new(4)},
 		{name: "absent decodes to nil (no false P0)", json: `[{"id":"a-4"}]`, want: nil},
 	}
 	for _, tc := range cases {
@@ -140,8 +140,6 @@ func TestDecodeIssuePriority(t *testing.T) {
 		})
 	}
 }
-
-func intp(i int) *int { return &i }
 
 // TestDecodeStatsWireShape pins the `summary` wrapper key that Stats() depends
 // on. bd stats --json emits { "summary": { "open_issues": N, … } }; if that

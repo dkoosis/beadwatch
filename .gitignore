@@ -7,3 +7,7 @@
 
 # bd audit residue: passive re-export, Dolt is source of truth
 .beads/interactions.jsonl
+
+# lint gate build/cache artifacts (bw-ajp)
+/bin/
+/.golangci-cache/

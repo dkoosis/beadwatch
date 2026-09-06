@@ -158,6 +158,8 @@ func TestComputeRowPartitionSumsToLiveBeads(t *testing.T) {
 		switch issues[i].Status {
 		case bd.StatusOpen, bd.StatusInProgress, bd.StatusBlocked:
 			wantTotal++
+		case bd.StatusClosed, bd.StatusDeferred:
+			// not live work — excluded from wantTotal
 		}
 	}
 	if got := row.BH + row.BO + row.BW + row.BB; got != wantTotal {
