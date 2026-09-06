@@ -3,5 +3,5 @@
 
 Every epic, in order, one line each: `N. [status] <epic title> → <epic id>`.
 
-1. [build] beadwatch publishes counts.json in strand's place, as a true partition → bw-4id
+1. [test] beadwatch publishes counts.json in strand's place, as a true partition → bw-4id
 
