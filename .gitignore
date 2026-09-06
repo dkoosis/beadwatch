@@ -4,3 +4,6 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# bd audit residue: passive re-export, Dolt is source of truth
+.beads/interactions.jsonl
