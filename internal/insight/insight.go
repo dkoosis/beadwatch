@@ -1,0 +1,150 @@
+// Package insight computes a bead's disjoint pulse lane — the ○/●/◆ partition
+// the counts derivation folds into bh/bo/bb. It takes issues and dependency
+// edges as plain data and returns the partition, never touching bd or HTTP.
+//
+// This is a deliberately narrow slice of strand's internal/insight (whose
+// Model/Compute machinery serves the dashboard and pulls in internal/graph and
+// internal/strand): only the lane partition — Lanes, laneOf, isHumanGated, and
+// what they need — comes along (bw-4wu Rules: "Derivation unchanged in this
+// task").
+package insight
+
+import (
+	"slices"
+
+	"github.com/dkoosis/beadwatch/internal/bd"
+)
+
+// humanLabel is the bd label marking a bead as parked on a human decision —
+// bdx's DECISION queue convention (the human-gate model).
+const humanLabel = "human"
+
+// reviewNeededKey is the bd metadata key marking a bead as awaiting human
+// review — bdx's REVIEW queue. bd emits it as the string "true"; bool is
+// tolerated defensively.
+const reviewNeededKey = "review_needed"
+
+// humanGate classifies a bead's human-gate state from its full issue record: a
+// DECISION (carries the "human" label) or a REVIEW (review_needed=="true"). A
+// bead carrying both is a decision — the stronger "needs a human call" signal.
+// A bead with neither is neither (claimable).
+func humanGate(iss *bd.Issue) (decision, review bool) {
+	if iss == nil {
+		return false, false
+	}
+	if slices.Contains(iss.Labels, humanLabel) {
+		return true, false
+	}
+	if reviewNeeded(iss.Metadata) {
+		return false, true
+	}
+	return false, false
+}
+
+// isHumanGated reports whether a bead is parked on a human (decision or
+// review) — the gate arm of laneOf.
+func isHumanGated(iss *bd.Issue) bool {
+	d, r := humanGate(iss)
+	return d || r
+}
+
+// reviewNeeded reads metadata.review_needed. bd emits the flag as the string
+// "true"; a bool true is tolerated in case a future bd quotes it differently.
+// Anything else is "not flagged".
+func reviewNeeded(m map[string]any) bool {
+	switch v := m[reviewNeededKey].(type) {
+	case string:
+		return v == "true"
+	case bool:
+		return v
+	default:
+		return false
+	}
+}
+
+// Lane is a bead's disjoint pulse lane — the trio a status line reads to
+// orient (○ Open / ● Blocked / ◆ Waiting). Exactly one lane per live bead;
+// LaneNone means the bead is in none of the derived trio (closed/deferred, or
+// an in-progress bead that isn't human-gated — ◐ is a raw status count, not
+// derived).
+type Lane uint8
+
+const (
+	LaneNone    Lane = iota
+	LaneOpen         // ○ actionable now
+	LaneBlocked      // ● held by an unmet blocker (or stored "blocked")
+	LaneWaiting      // ◆ parked on a human
+)
+
+// laneOf is the single precedence kernel Lanes runs: a blocker outranks the
+// human gate outranks plain open. A stored-status "blocked" bead is blocked
+// regardless of gate; an in-progress bead is ◆ only when gated, else it's a
+// raw ◐ (LaneNone here).
+func laneOf(status bd.Status, gated, hasBlocker bool) Lane {
+	switch status {
+	case bd.StatusClosed, bd.StatusDeferred:
+		return LaneNone // not live work
+	case bd.StatusBlocked:
+		return LaneBlocked
+	case bd.StatusInProgress:
+		if gated {
+			return LaneWaiting // ◆ overlays ◐
+		}
+		return LaneNone // a raw ◐ count, not a derived lane
+	case bd.StatusOpen:
+		switch {
+		case hasBlocker:
+			return LaneBlocked
+		case gated:
+			return LaneWaiting
+		default:
+			return LaneOpen
+		}
+	}
+	return LaneNone // unknown/future status — defensive
+}
+
+// Lanes assigns every issue to its disjoint pulse lane, repo-wide, from the
+// one laneOf precedence. deps carry the blocker signal; nil deps ⇒ no bead is
+// dependency-blocked (a cold-cache path). LaneNone beads are omitted, so a
+// missing key reads back as LaneNone (its zero value). Exactly one lane per
+// included issue, so a count of a lane and a list of that lane's members agree
+// by construction.
+func Lanes(issues []bd.Issue, deps []bd.DepEdge) map[string]Lane {
+	idx := indexIssues(issues)
+	openBlockers := blockerCounts(deps, idx)
+	lanes := make(map[string]Lane, len(issues))
+	for i := range issues {
+		iss := &issues[i]
+		if l := laneOf(iss.Status, isHumanGated(iss), openBlockers[iss.ID] > 0); l != LaneNone {
+			lanes[iss.ID] = l
+		}
+	}
+	return lanes
+}
+
+// indexIssues maps every repo bead by id.
+func indexIssues(issues []bd.Issue) map[string]bd.Issue {
+	m := make(map[string]bd.Issue, len(issues))
+	for i := range issues {
+		m[issues[i].ID] = issues[i]
+	}
+	return m
+}
+
+// blockerCounts tallies, per bead, how many of its blocks-dependencies are
+// still unmet. A blocker counts only if it's present in the live index AND
+// not closed; an absent target is treated as resolved, since `bd list` omits
+// closed beads (a done dependency simply isn't in the list).
+func blockerCounts(deps []bd.DepEdge, idx map[string]bd.Issue) map[string]int {
+	open := map[string]int{}
+	for _, d := range deps {
+		if d.Type != bd.DepBlocks {
+			continue
+		}
+		if iss, ok := idx[d.DependsOnID]; ok && iss.Status != bd.StatusClosed {
+			open[d.IssueID]++
+		}
+	}
+	return open
+}
