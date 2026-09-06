@@ -49,7 +49,15 @@ NEW_LABEL="com.trixi.beadwatch"
 OLD_LABEL="com.trixi.bd-counts"
 NEW_PLIST="$LAUNCH_AGENTS_DIR/$NEW_LABEL.plist"
 OLD_PLIST="$LAUNCH_AGENTS_DIR/$OLD_LABEL.plist"
-BEADWATCH_BIN="$HOME_DIR/go/bin/beadwatch"
+# Go installs to GOBIN when it is set, and only otherwise to $HOME/go/bin. dk's
+# second laptop sets GOBIN=/usr/local/bin (dotfiles 432305a converged user-
+# installed utilities there), so a hardcoded ~/go/bin names a binary that is not
+# on that machine — and launchd then fails silently every 120s, leaving
+# counts.json unwritten with nothing on screen to say why (bw-q62). `go` can be
+# absent from a stripped PATH, so both legs fall back.
+GOBIN_DIR="$(command -v go >/dev/null 2>&1 && go env GOBIN 2>/dev/null || true)"
+[ -n "$GOBIN_DIR" ] || GOBIN_DIR="$HOME_DIR/go/bin"
+BEADWATCH_BIN="$GOBIN_DIR/beadwatch"
 LOG_PATH="$HOME_DIR/.cache/cc-dashboard/beadwatch.log"
 UID_NUM="$(id -u)"
 # launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin — bd lives at
@@ -57,6 +65,13 @@ UID_NUM="$(id -u)"
 # expanded here, at write time, into a literal path — not left as "$HOME" for
 # launchd to expand, since launchd does not expand it.
 AGENT_PATH="/opt/homebrew/bin:/usr/local/bin:$HOME_DIR/go/bin:/usr/bin:/bin"
+# A GOBIN outside that list would leave the agent unable to reach its own
+# binary's siblings. Prepend it only when it is not already covered, so the
+# common empty-GOBIN case writes the same string it always did.
+case ":$AGENT_PATH:" in
+  *":$GOBIN_DIR:"*) ;;
+  *) AGENT_PATH="$GOBIN_DIR:$AGENT_PATH" ;;
+esac
 
 CHECK=0
 while [ $# -gt 0 ]; do
@@ -73,6 +88,14 @@ todo() { printf '  ✗ %s\n' "$1"; missing=$((missing+1)); }
 
 command -v plutil    >/dev/null 2>&1 || { echo "tool-install-launchd: plutil required"    >&2; exit 2; }
 command -v launchctl >/dev/null 2>&1 || { echo "tool-install-launchd: launchctl required" >&2; exit 2; }
+
+# Refuse to author a plist naming a binary that is not there — that is the
+# silent-every-120s failure of bw-q62, and it costs nothing to catch here.
+# --check is exempt: its job is to report what is missing, not to require it.
+if [ "$CHECK" -eq 0 ] && [ ! -x "$BEADWATCH_BIN" ]; then
+  echo "tool-install-launchd: no beadwatch binary at $BEADWATCH_BIN — run 'make install' first" >&2
+  exit 2
+fi
 
 # --- discover repos ----------------------------------------------------------
 # Direct children only — matches the shape of the bd-counts template plist
