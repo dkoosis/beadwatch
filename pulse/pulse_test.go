@@ -31,8 +31,8 @@ func TestLaneOfDerivationTable(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := laneOf(c.status, c.gated, c.hasBlocker); got != c.want {
-				t.Errorf("laneOf(%v, gated=%v, hasBlocker=%v) = %v, want %v", c.status, c.gated, c.hasBlocker, got, c.want)
+			if got := LaneOf(c.status, c.gated, c.hasBlocker); got != c.want {
+				t.Errorf("LaneOf(%v, gated=%v, hasBlocker=%v) = %v, want %v", c.status, c.gated, c.hasBlocker, got, c.want)
 			}
 		})
 	}
@@ -42,7 +42,7 @@ func TestLaneOfDerivationTable(t *testing.T) {
 // promises: bh+bo+bw+bb equals the count of beads whose status is open,
 // in_progress or blocked — nothing live is dropped and nothing is double
 // counted. The fixture carries every gate/status/blocker overlap. Against the
-// pre-change laneOf this is red: an ungated in_progress bead (plain-inprogress)
+// pre-change LaneOf this is red: an ungated in_progress bead (plain-inprogress)
 // used to map to LaneNone (a raw ◐ count kept outside the partition), so it
 // vanished from the sum instead of landing in bw.
 func TestPartitionSumsToLiveBeads(t *testing.T) {

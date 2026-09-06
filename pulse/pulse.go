@@ -6,7 +6,7 @@
 //
 // The code was lifted from strand's internal/insight (whose Model/Compute
 // machinery serves the dashboard and pulls in internal/graph and
-// internal/strand); only the lane partition — Lanes, laneOf, isHumanGated, and
+// internal/strand); only the lane partition — Lanes, LaneOf, isHumanGated, and
 // what they need — came along. This package is now the one home for it, and
 // the direction of the dependency reverses: strand imports pulse rather than
 // keeping a copy (bw-4id.1), and beadwatch's own internal/insight is a thin
@@ -43,7 +43,7 @@ func humanGate(iss *Issue) (decision, review bool) {
 }
 
 // isHumanGated reports whether a bead is parked on a human (decision or
-// review) — the gate arm of laneOf.
+// review) — the gate arm of LaneOf.
 func isHumanGated(iss *Issue) bool {
 	d, r := humanGate(iss)
 	return d || r
@@ -80,14 +80,20 @@ const (
 	LaneWaiting         // ◆ parked on a human
 )
 
-// laneOf is the single precedence kernel Lanes runs, per decision
+// LaneOf is the single precedence kernel Lanes runs, per decision
 // 477486825755: gated beats blocked beats open/in-progress. A gated bead is
 // LaneWaiting regardless of status or dependencies — a human call outranks
 // everything else a bead could be waiting on. Only once gated is ruled out
 // does status/blocker decide: a stored "blocked" status or an open bead with
 // an unmet blocker is LaneBlocked; an ungated in-progress bead is
 // LaneInProgress; a plain open bead is LaneOpen.
-func laneOf(status Status, gated, hasBlocker bool) Lane {
+//
+// Exported for a caller that already holds the two derived signals and needs
+// one bead's lane rather than a repo-wide map — strand's board Classify, which
+// takes the status from its own projected bead and the gate from the matching
+// bd issue. Prefer Lanes when you have the issue list: it derives gated and
+// hasBlocker for you, and its result is a partition by construction.
+func LaneOf(status Status, gated, hasBlocker bool) Lane {
 	if status == StatusClosed || status == StatusDeferred {
 		return LaneNone // not live work
 	}
@@ -112,7 +118,7 @@ func laneOf(status Status, gated, hasBlocker bool) Lane {
 }
 
 // Lanes assigns every issue to its disjoint pulse lane, repo-wide, from the
-// one laneOf precedence. deps carry the blocker signal; nil deps ⇒ no bead is
+// one LaneOf precedence. deps carry the blocker signal; nil deps ⇒ no bead is
 // dependency-blocked (a cold-cache path). LaneNone beads (closed/deferred) are
 // omitted, so a missing key reads back as LaneNone (its zero value). Exactly
 // one lane per included issue, so a count of a lane and a list of that lane's
@@ -124,7 +130,7 @@ func Lanes(issues []Issue, deps []DepEdge) map[string]Lane {
 	lanes := make(map[string]Lane, len(issues))
 	for i := range issues {
 		iss := &issues[i]
-		if l := laneOf(iss.Status, isHumanGated(iss), openBlockers[iss.ID] > 0); l != LaneNone {
+		if l := LaneOf(iss.Status, isHumanGated(iss), openBlockers[iss.ID] > 0); l != LaneNone {
 			lanes[iss.ID] = l
 		}
 	}
