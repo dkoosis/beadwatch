@@ -1,12 +1,12 @@
-// Package insight computes a bead's disjoint pulse lane — the ○/●/◆ partition
-// the counts derivation folds into bh/bo/bb. It takes issues and dependency
-// edges as plain data and returns the partition, never touching bd or HTTP.
+// Package insight computes a bead's disjoint pulse lane — the ○/◐/●/◆
+// four-way partition the counts derivation folds into bh/bo/bw/bb. It takes
+// issues and dependency edges as plain data and returns the partition, never
+// touching bd or HTTP.
 //
 // This is a deliberately narrow slice of strand's internal/insight (whose
 // Model/Compute machinery serves the dashboard and pulls in internal/graph and
 // internal/strand): only the lane partition — Lanes, laneOf, isHumanGated, and
-// what they need — comes along (bw-4wu Rules: "Derivation unchanged in this
-// task").
+// what they need — comes along.
 package insight
 
 import (
@@ -62,54 +62,58 @@ func reviewNeeded(m map[string]any) bool {
 	}
 }
 
-// Lane is a bead's disjoint pulse lane — the trio a status line reads to
-// orient (○ Open / ● Blocked / ◆ Waiting). Exactly one lane per live bead;
-// LaneNone means the bead is in none of the derived trio (closed/deferred, or
-// an in-progress bead that isn't human-gated — ◐ is a raw status count, not
-// derived).
+// Lane is a bead's disjoint pulse lane — the four-way partition a status line
+// reads to orient (○ Open / ◐ InProgress / ● Blocked / ◆ Waiting). Exactly one
+// lane per live bead; LaneNone means the bead is not live work (closed or
+// deferred). Decision 477486825755: human wins every overlap — a gated bead is
+// LaneWaiting whatever its status or dependencies, so LaneInProgress means
+// "in progress and NOT gated" (a gated in-progress bead is LaneWaiting only,
+// never double-counted into both).
 type Lane uint8
 
 const (
-	LaneNone    Lane = iota
-	LaneOpen         // ○ actionable now
-	LaneBlocked      // ● held by an unmet blocker (or stored "blocked")
-	LaneWaiting      // ◆ parked on a human
+	LaneNone       Lane = iota
+	LaneOpen            // ○ actionable now
+	LaneInProgress      // ◐ claimed, not gated
+	LaneBlocked         // ● held by an unmet blocker (or stored "blocked")
+	LaneWaiting         // ◆ parked on a human
 )
 
-// laneOf is the single precedence kernel Lanes runs: a blocker outranks the
-// human gate outranks plain open. A stored-status "blocked" bead is blocked
-// regardless of gate; an in-progress bead is ◆ only when gated, else it's a
-// raw ◐ (LaneNone here).
+// laneOf is the single precedence kernel Lanes runs, per decision
+// 477486825755: gated beats blocked beats open/in-progress. A gated bead is
+// LaneWaiting regardless of status or dependencies — a human call outranks
+// everything else a bead could be waiting on. Only once gated is ruled out
+// does status/blocker decide: a stored "blocked" status or an open bead with
+// an unmet blocker is LaneBlocked; an ungated in-progress bead is
+// LaneInProgress; a plain open bead is LaneOpen.
 func laneOf(status bd.Status, gated, hasBlocker bool) Lane {
-	switch status {
-	case bd.StatusClosed, bd.StatusDeferred:
+	if status == bd.StatusClosed || status == bd.StatusDeferred {
 		return LaneNone // not live work
+	}
+	if gated {
+		return LaneWaiting // human wins every overlap — status and blocker moot
+	}
+	switch status {
 	case bd.StatusBlocked:
 		return LaneBlocked
 	case bd.StatusInProgress:
-		if gated {
-			return LaneWaiting // ◆ overlays ◐
-		}
-		return LaneNone // a raw ◐ count, not a derived lane
+		return LaneInProgress
 	case bd.StatusOpen:
-		switch {
-		case hasBlocker:
+		if hasBlocker {
 			return LaneBlocked
-		case gated:
-			return LaneWaiting
-		default:
-			return LaneOpen
 		}
+		return LaneOpen
 	}
 	return LaneNone // unknown/future status — defensive
 }
 
 // Lanes assigns every issue to its disjoint pulse lane, repo-wide, from the
 // one laneOf precedence. deps carry the blocker signal; nil deps ⇒ no bead is
-// dependency-blocked (a cold-cache path). LaneNone beads are omitted, so a
-// missing key reads back as LaneNone (its zero value). Exactly one lane per
-// included issue, so a count of a lane and a list of that lane's members agree
-// by construction.
+// dependency-blocked (a cold-cache path). LaneNone beads (closed/deferred) are
+// omitted, so a missing key reads back as LaneNone (its zero value). Exactly
+// one lane per included issue, so a count of a lane and a list of that lane's
+// members agree by construction, and bh+bo+bw+bb sums to the count of beads
+// whose status is open, in_progress or blocked.
 func Lanes(issues []bd.Issue, deps []bd.DepEdge) map[string]Lane {
 	idx := indexIssues(issues)
 	openBlockers := blockerCounts(deps, idx)

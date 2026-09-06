@@ -78,9 +78,9 @@ type RoadmapPos struct {
 const issueTypeEpic = "epic"
 
 // EpicRow is one live roadmap epic's ◆○◐● partition over its DIRECT children
-// (Issue.Parent == the epic's id), excluding nested epics (issue_type=="epic"). bw
-// is the raw in_progress status total, overlapping bh for a gated in-progress child
-// — mirroring Row's own repo-level bw rule.
+// (Issue.Parent == the epic's id), excluding nested epics (issue_type=="epic").
+// Human wins every overlap (decision 477486825755): a gated in-progress child
+// lands in BH only, never also in BW — mirroring Row's own repo-level rule.
 type EpicRow struct {
 	ID string `json:"id"`
 	// Title is bd's epic title, from the same EpicStatus read the buckets derive
@@ -153,7 +153,7 @@ func computeRow(ctx context.Context, src source, root string) (Row, error) {
 	// what's-next cascade — zero new bd execs beyond what this function already
 	// fetched (st-3wp.1 §Design/2).
 	lanes := insight.Lanes(issues, deps)
-	bh, bo, bb := laneCounts(lanes)
+	bh, bo, bw, bb := laneCounts(lanes)
 
 	roadmap := strandmd.Roadmap(root)
 	var epicRows []EpicRow
@@ -173,7 +173,7 @@ func computeRow(ctx context.Context, src source, root string) (Row, error) {
 	}
 	return Row{
 		Root: root, Prefix: prefix(root),
-		BH: bh, BO: bo, BW: stats.InProgress, BB: bb,
+		BH: bh, BO: bo, BW: bw, BB: bb,
 		BCl: stats.Closed, BDf: stats.Deferred,
 		Epics: epicRows, Next: next, Claimed: claimed,
 		Roadmap: pos,
@@ -181,26 +181,29 @@ func computeRow(ctx context.Context, src source, root string) (Row, error) {
 	}, nil
 }
 
-// laneCounts tallies the three human-facing lanes from an already-computed
-// insight.Lanes partition — the same partition strand's Waiting pane lists — so the
-// badge ◆ count can't drift from it. ◐ (bw) is NOT taken here: it is the raw
-// in_progress status total (stats.InProgress), which overlaps ◆ for a gated
-// in-progress bead, matching the masthead.
-func laneCounts(lanes map[string]insight.Lane) (bh, bo, bb int) {
+// laneCounts tallies the four-way partition from an already-computed
+// insight.Lanes pass (decision 477486825755: human wins every overlap). bw is
+// taken from the SAME pass as bh/bo/bb, not from the raw stats.InProgress
+// total: a gated in-progress bead is LaneWaiting, not LaneInProgress, so it
+// lands in bh only — counting it again from raw stats would double-count it
+// and break the bh+bo+bw+bb == open+in_progress+blocked partition property.
+// bcl/bdf still come from Stats, not here.
+func laneCounts(lanes map[string]insight.Lane) (bh, bo, bw, bb int) {
 	for _, l := range lanes {
 		switch l {
 		case insight.LaneWaiting:
 			bh++
 		case insight.LaneOpen:
 			bo++
+		case insight.LaneInProgress:
+			bw++
 		case insight.LaneBlocked:
 			bb++
 		case insight.LaneNone:
-			// ◐ ungated in_progress / closed / deferred — not a human-facing lane;
-			// bw/bcl/bdf come from Stats, not here.
+			// closed/deferred — not live work.
 		}
 	}
-	return bh, bo, bb
+	return bh, bo, bw, bb
 }
 
 // liveRoadmapEpics returns the roadmap-ordered epic ids that map to a non-closed
@@ -266,10 +269,11 @@ func roadmapPos(roadmap []string, currentEpic string) *RoadmapPos {
 // epicBuckets builds one ◆○◐● bucket row per live roadmap epic, in liveEpics' order
 // (roadmap order), over each epic's DIRECT children only (Issue.Parent == the
 // epic's id) — a nested epic child (issue_type=="epic") never counts toward its
-// parent's buckets. bw is the raw in_progress status total for that epic's
-// children, overlapping bh for a gated in-progress child (mirrors laneCounts' own
-// repo-level bw rule). nil when liveEpics is empty, matching the JSON schema's
-// "epics: null" for a repo with no live roadmap epic.
+// parent's buckets. bw comes from the SAME lanes pass as bh/bo/bb (mirrors
+// laneCounts' own repo-level rule): a gated in-progress child lands in bh
+// only, never double-counted into bw too. nil when liveEpics is empty,
+// matching the JSON schema's "epics: null" for a repo with no live roadmap
+// epic.
 func epicBuckets(liveEpics []string, meta map[string]bd.EpicStatus, issues []bd.Issue, lanes map[string]insight.Lane) []EpicRow {
 	if len(liveEpics) == 0 {
 		return nil
@@ -290,14 +294,13 @@ func epicBuckets(liveEpics []string, meta map[string]bd.EpicStatus, issues []bd.
 		if !ok {
 			continue
 		}
-		if iss.Status == bd.StatusInProgress {
-			rows[ri].BW++
-		}
 		switch lanes[iss.ID] {
 		case insight.LaneWaiting:
 			rows[ri].BH++
 		case insight.LaneOpen:
 			rows[ri].BO++
+		case insight.LaneInProgress:
+			rows[ri].BW++
 		case insight.LaneBlocked:
 			rows[ri].BB++
 		case insight.LaneNone:
