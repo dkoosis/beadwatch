@@ -33,8 +33,24 @@ STUBBIN="$TMP/stubbin"; mkdir -p "$STUBBIN"
 printf '#!/bin/sh\necho "$@" >> "%s"\nexit 0\n' "$LCLOG" > "$STUBBIN/launchctl"
 chmod +x "$STUBBIN/launchctl"
 
+# The SUT refuses to author a plist naming a binary that is not there, so the
+# scratch home needs one at each GOBIN this file exercises.
+mkdir -p "$FHOME/go/bin" "$TMP/altbin"
+printf '#!/bin/sh\nexit 0\n' > "$FHOME/go/bin/beadwatch"; chmod +x "$FHOME/go/bin/beadwatch"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/altbin/beadwatch";   chmod +x "$TMP/altbin/beadwatch"
+
+# GOBIN is pinned empty rather than inherited: the SUT reads `go env GOBIN`, and
+# a developer machine that sets it (dk's second laptop uses /usr/local/bin) would
+# otherwise move the binary path out from under every assertion below.
 run() {
-  HOME="$FHOME" BD_COUNTS_PROJECTS_DIR="$PROJDIR" PATH="$STUBBIN:$PATH" \
+  HOME="$FHOME" BD_COUNTS_PROJECTS_DIR="$PROJDIR" PATH="$STUBBIN:$PATH" GOBIN="" \
+    bash "$SUT" "$@" 2>&1
+}
+
+# run_gobin <dir> [args...] — same, with GOBIN pointed somewhere else.
+run_gobin() {
+  _gb="$1"; shift
+  HOME="$FHOME" BD_COUNTS_PROJECTS_DIR="$PROJDIR" PATH="$STUBBIN:$PATH" GOBIN="$_gb" \
     bash "$SUT" "$@" 2>&1
 }
 
@@ -64,6 +80,8 @@ has "<integer>2</integer>" "$CONTENT" "ThrottleInterval is 2"
 has "$FHOME/.cache/cc-dashboard/beadwatch.log" "$CONTENT" "StandardErrorPath is the beadwatch log"
 has "/opt/homebrew/bin:/usr/local/bin:$FHOME/go/bin:/usr/bin:/bin" "$CONTENT" \
     "EnvironmentVariables PATH carries homebrew, go/bin and the HOME-expanded path"
+lacks "$FHOME/go/bin:/opt/homebrew" "$CONTENT" \
+    "an empty GOBIN never prepends a duplicate go/bin to PATH"
 has "<key>BD_COUNTS_PROJECTS_DIR</key>" "$CONTENT" "EnvironmentVariables carries the BD_COUNTS_PROJECTS_DIR key"
 has "<string>$PROJDIR</string>" "$CONTENT" "BD_COUNTS_PROJECTS_DIR is set to the discovered projects dir"
 lacks '<string>$HOME' "$CONTENT" "PATH is expanded at write time, not left as a literal \$HOME for launchd"
@@ -142,6 +160,28 @@ run >/dev/null 2>&1
 [ -f "$OLD_PLIST" ] && ok "a foreign plist at the old path survives a real install run" \
                      || bad "foreign old plist survives" "it was removed"
 rm -f "$OLD_PLIST"
+
+echo "a set GOBIN moves the binary path, and PATH follows it:"
+# bw-q62: dk's second laptop sets GOBIN=/usr/local/bin, so `go install` puts
+# beadwatch there and a hardcoded ~/go/bin names nothing. launchd's failure is
+# silent — every 120s, with counts.json simply never written.
+rm -f "$NEW_PLIST"
+OUT10="$(run_gobin "$TMP/altbin")"; RC10=$?
+[ "$RC10" -eq 0 ] && ok "install exits 0 with GOBIN set" || bad "install exits 0 with GOBIN set" "got $RC10: $OUT10"
+CONTENT_G="$(cat "$NEW_PLIST" 2>/dev/null)"
+has "<string>$TMP/altbin/beadwatch</string>" "$CONTENT_G" "ProgramArguments names the binary under GOBIN"
+lacks "<string>$FHOME/go/bin/beadwatch</string>" "$CONTENT_G" "the hardcoded ~/go/bin path is gone"
+has "$TMP/altbin:/opt/homebrew/bin" "$CONTENT_G" "GOBIN is prepended to the agent's PATH"
+
+echo "install refuses when the resolved binary is absent:"
+rm -f "$NEW_PLIST"
+OUT11="$(run_gobin "$TMP/nowhere")"; RC11=$?
+[ "$RC11" -eq 2 ] && ok "install exits 2 when the binary is missing" || bad "install exits 2 when the binary is missing" "got $RC11"
+has "no beadwatch binary at $TMP/nowhere/beadwatch" "$OUT11" "the refusal names the path it looked at"
+[ -f "$NEW_PLIST" ] && bad "no plist is written on refusal" "one was written" \
+                     || ok "no plist is written on refusal"
+OUT12="$(run_gobin "$TMP/nowhere" --check)"; RC12=$?
+[ "$RC12" -eq 1 ] && ok "--check still reports rather than refusing" || bad "--check still reports" "got $RC12: $OUT12"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
