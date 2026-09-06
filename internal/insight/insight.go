@@ -1,7 +1,7 @@
 // Package insight adapts beadwatch's own bd.Issue/bd.DepEdge to the
 // github.com/dkoosis/beadwatch/pulse package's plain input types and calls
 // pulse.Lanes for the four-way ○/◐/●/◆ partition the counts derivation folds
-// into bh/bo/bw/bb. The partition logic itself — Lanes, laneOf, isHumanGated,
+// into bh/bo/bw/bb. The partition logic itself — Lanes, LaneOf, isHumanGated,
 // and the rest of the derivation kernel — lives in pulse, exported outside
 // internal/ so strand can import it directly instead of carrying its own copy
 // (decision 251431366484: one derivation, one brain). This package holds only
