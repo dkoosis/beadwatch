@@ -54,7 +54,11 @@ OUT2="$(run)"; RC2=$?
 CONTENT="$(cat "$NEW_PLIST" 2>/dev/null)"
 has "<string>com.trixi.beadwatch</string>" "$CONTENT" "Label is com.trixi.beadwatch"
 has "<string>$FHOME/go/bin/beadwatch</string>" "$CONTENT" "ProgramArguments names the beadwatch binary"
-has "<string>--all</string>" "$CONTENT" "ProgramArguments carries --all"
+PA_BLOCK="$(awk '/<key>ProgramArguments<\/key>/{f=1} f{print} f && /<\/array>/{exit}' "$NEW_PLIST")"
+PA_COUNT="$(grep -c '<string>' <<<"$PA_BLOCK")"
+[ "$PA_COUNT" -eq 1 ] && ok "ProgramArguments has exactly one string (no arguments)" \
+                       || bad "ProgramArguments has exactly one string" "found $PA_COUNT"
+lacks "--all" "$PA_BLOCK" "ProgramArguments never carries --all — bare invocation is changed-only mode"
 has "<integer>120</integer>" "$CONTENT" "StartInterval is 120"
 has "<integer>2</integer>" "$CONTENT" "ThrottleInterval is 2"
 has "$FHOME/.cache/cc-dashboard/beadwatch.log" "$CONTENT" "StandardErrorPath is the beadwatch log"
