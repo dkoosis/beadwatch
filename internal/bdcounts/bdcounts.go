@@ -4,8 +4,8 @@
 // and strand's masthead pulse are both dumb readers of the same file, so the two
 // surfaces can never disagree (st-p1f).
 //
-// History: the writer was com.trixi.bd-counts running cc-plugins'
-// bd-counts-refresh.sh, then `strand counts`; beadwatch replaced both (bw-4id).
+// History: com.trixi.bd-counts ran cc-plugins' bd-counts-refresh.sh here first.
+// History: `strand counts` wrote it next. beadwatch replaced both (bw-4id).
 //
 // The file is a JSON object keyed by each repo's absolute root path:
 //
