@@ -13,7 +13,13 @@
 #   1. Discovers every directory directly under $BD_COUNTS_PROJECTS_DIR
 #      (default ~/Projects) holding .beads/last-touched or .beads/metadata.json.
 #   2. Authors com.trixi.beadwatch.plist: ProgramArguments ~/go/bin/beadwatch
-#      --all, EnvironmentVariables PATH (launchd's own PATH has no homebrew or
+#      with NO arguments — bare invocation is beadwatch's changed-only mode
+#      (internal/counts/refresh.go's modeChanged: skips any repo whose
+#      .beads mtime is unchanged). A WatchPaths wake fires with --all's
+#      unconditional sweep of every discovered repo measured at ~2.4 min on
+#      this machine's 23 repos — too slow for a bd write to reach counts.json
+#      inside the 10s AC, and the wrong mode for a per-repo wake signal
+#      anyway. EnvironmentVariables PATH (launchd's own PATH has no homebrew or
 #      go bin dir, and bd lives in one of those) and BD_COUNTS_PROJECTS_DIR,
 #      one WatchPaths entry per discovered repo's .beads/last-touched,
 #      StartInterval 120, ThrottleInterval 2, RunAtLoad, stderr to
@@ -105,7 +111,6 @@ build_new_plist() {
   printf '    <key>Label</key>\n    <string>%s</string>\n' "$NEW_LABEL"
   printf '    <key>ProgramArguments</key>\n    <array>\n'
   printf '        <string>%s</string>\n' "$BEADWATCH_BIN"
-  printf '        <string>--all</string>\n'
   printf '    </array>\n'
   printf '    <key>EnvironmentVariables</key>\n    <dict>\n'
   printf '        <key>PATH</key>\n        <string>%s</string>\n' "$AGENT_PATH"
