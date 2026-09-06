@@ -30,25 +30,33 @@ var errEpicStatusBoom = errors.New("bd epic status: boom")
 // TestLaneCountsMatchesInsightPartition is the 5-vs-7 repro: the shell's
 // `ready ∧ label=human` missed two ◆ beads — a review_needed open bead and a
 // human-labelled in-progress bead. laneCounts routes both to bh via insight.Lanes,
-// so the badge count becomes the exact set the Waiting pane lists.
+// so the badge count becomes the exact set the Waiting pane lists. Also pins
+// decision 477486825755 (human wins overlaps): the gated in-progress bead lands
+// in bh ONLY — bw counts just the plain in-progress bead, not both.
 func TestLaneCountsMatchesInsightPartition(t *testing.T) {
 	issues := []bd.Issue{
 		{ID: "open-plain", Status: bd.StatusOpen},                                                     // ○
 		{ID: "open-human", Status: bd.StatusOpen, Labels: []string{"human"}},                          // ◆ decision
 		{ID: "open-review", Status: bd.StatusOpen, Metadata: map[string]any{"review_needed": "true"}}, // ◆ review
-		{ID: "ip-plain", Status: bd.StatusInProgress},                                                 // ◐ only (LaneNone)
-		{ID: "ip-human", Status: bd.StatusInProgress, Labels: []string{"human"}},                      // ◆ overlays ◐
+		{ID: "ip-plain", Status: bd.StatusInProgress},                                                 // ◐
+		{ID: "ip-human", Status: bd.StatusInProgress, Labels: []string{"human"}},                      // ◆ — bh only, not also bw
 		{ID: "blk", Status: bd.StatusBlocked},                                                         // ●
 	}
-	bh, bo, bb := laneCounts(insight.Lanes(issues, nil))
+	bh, bo, bw, bb := laneCounts(insight.Lanes(issues, nil))
 	if bh != 3 {
 		t.Errorf("bh (◆ Waiting) = %d, want 3 — human + review_needed + in_progress-gated", bh)
 	}
 	if bo != 1 {
 		t.Errorf("bo (○ Open) = %d, want 1 — the review_needed bead must NOT count here", bo)
 	}
+	if bw != 1 {
+		t.Errorf("bw (◐ InProgress) = %d, want 1 — the gated in-progress bead must NOT count here too", bw)
+	}
 	if bb != 1 {
 		t.Errorf("bb (● Blocked) = %d, want 1", bb)
+	}
+	if got, want := bh+bo+bw+bb, 6; got != want {
+		t.Errorf("bh+bo+bw+bb = %d, want %d (the count of open/in_progress/blocked beads)", got, want)
 	}
 }
 
@@ -71,10 +79,12 @@ func (f *fakeSource) EpicStatus(context.Context) ([]bd.EpicStatus, error) {
 	return f.epics, f.epicsErr
 }
 
-// TestComputeRowAssemblesBuckets pins the full row: lane counts from insight, bw/bcl/
-// bdf straight from Stats (bw is the raw in_progress total, overlapping ◆). The repo
-// path has no .beads, so prefix falls back to the basename and ts is 0 — the row still
-// builds (no roadmap file means no epic buckets, not an error).
+// TestComputeRowAssemblesBuckets pins the full row: bh/bo/bw/bb all come from
+// the one insight.Lanes pass; bcl/bdf straight from Stats. stats.InProgress is
+// deliberately set to a DIFFERENT value than the lane-derived bw (2, not 1) to
+// pin that Row.BW no longer reads it. The repo path has no .beads, so prefix
+// falls back to the basename and ts is 0 — the row still builds (no roadmap
+// file means no epic buckets, not an error).
 func TestComputeRowAssemblesBuckets(t *testing.T) {
 	src := &fakeSource{
 		issues: []bd.Issue{
@@ -82,7 +92,7 @@ func TestComputeRowAssemblesBuckets(t *testing.T) {
 			{ID: "h", Status: bd.StatusOpen, Labels: []string{"human"}},
 			{ID: "ip", Status: bd.StatusInProgress},
 		},
-		stats: bd.Stats{InProgress: 1, Closed: 42, Deferred: 3},
+		stats: bd.Stats{InProgress: 2, Closed: 42, Deferred: 3},
 	}
 	row, err := computeRow(context.Background(), src, "/tmp/not-a-repo-xyz")
 	if err != nil {
@@ -99,6 +109,68 @@ func TestComputeRowAssemblesBuckets(t *testing.T) {
 	}
 	if row.Epics != nil {
 		t.Errorf("epics = %v, want nil for a repo with no roadmap file", row.Epics)
+	}
+}
+
+// TestComputeRowPartitionSumsToLiveBeads is bw-v12's partition property
+// (decision 477486825755): row.BH+BO+BW+BB must equal the count of the
+// source's open/in_progress/blocked beads — nothing live dropped, nothing
+// double-counted. The fixture carries every gate x status x blocker overlap.
+//
+// This is red against the pre-change Row.BW = stats.InProgress: that raw
+// total already includes every in-progress bead regardless of gate, while BH
+// (from insight.Lanes) ALSO counts a gated in-progress bead — so a gated
+// in-progress bead like "ip-gated" below was counted in both BH and BW, and
+// the sum came out one bead OVER the live count instead of equal to it.
+// Measured before this change: bh=2 bo=2 bw=2 bb=4, sum=10, want=9.
+func TestComputeRowPartitionSumsToLiveBeads(t *testing.T) {
+	issues := []bd.Issue{
+		{ID: "o-plain", Status: bd.StatusOpen},
+		{ID: "o-gated", Status: bd.StatusOpen, Labels: []string{"human"}},
+		{ID: "o-blocked", Status: bd.StatusOpen},
+		{ID: "o-gated-blocked", Status: bd.StatusOpen, Labels: []string{"human"}},
+		{ID: "ip-plain", Status: bd.StatusInProgress},
+		{ID: "ip-gated", Status: bd.StatusInProgress, Labels: []string{"human"}},
+		{ID: "blk-plain", Status: bd.StatusBlocked},
+		{ID: "blk-gated", Status: bd.StatusBlocked, Labels: []string{"human"}},
+		{ID: "blocker", Status: bd.StatusOpen},
+		{ID: "done", Status: bd.StatusClosed},
+	}
+	deps := []bd.DepEdge{
+		{IssueID: "o-blocked", DependsOnID: "blocker", Type: bd.DepBlocks},
+		{IssueID: "o-gated-blocked", DependsOnID: "blocker", Type: bd.DepBlocks},
+	}
+	src := &fakeSource{
+		issues: issues,
+		deps:   deps,
+		// A pre-change reader would fold this raw total into BW on top of the
+		// lane-derived BH, double-counting ip-gated; a post-change reader
+		// ignores it for BW entirely.
+		stats: bd.Stats{InProgress: 2},
+	}
+	row, err := computeRow(context.Background(), src, "/tmp/not-a-repo-xyz")
+	if err != nil {
+		t.Fatalf("computeRow: %v", err)
+	}
+
+	var wantTotal int
+	for i := range issues {
+		switch issues[i].Status {
+		case bd.StatusOpen, bd.StatusInProgress, bd.StatusBlocked:
+			wantTotal++
+		}
+	}
+	if got := row.BH + row.BO + row.BW + row.BB; got != wantTotal {
+		t.Errorf("bh+bo+bw+bb = %d (bh=%d bo=%d bw=%d bb=%d), want %d — the count of open/in_progress/blocked beads",
+			got, row.BH, row.BO, row.BW, row.BB, wantTotal)
+	}
+	// Bucket-exact per decision 477486825755 (gated beats blocked beats open):
+	// bh = o-gated, o-gated-blocked, ip-gated, blk-gated (4)
+	// bo = o-plain, blocker (2)
+	// bw = ip-plain (1)
+	// bb = o-blocked, blk-plain (2)
+	if row.BH != 4 || row.BO != 2 || row.BW != 1 || row.BB != 2 {
+		t.Errorf("buckets = bh=%d bo=%d bw=%d bb=%d, want bh=4 bo=2 bw=1 bb=2", row.BH, row.BO, row.BW, row.BB)
 	}
 }
 
@@ -284,18 +356,19 @@ func TestPickNextExcludesRepoWideReadyOutsideEveryRung(t *testing.T) {
 
 // --- epicBuckets: the ◆○◐● partition per live roadmap epic ---
 
-// TestEpicBuckets pins the full per-epic partition: bh/bo/bb come from lanes, bw is
-// the raw in_progress status total (overlapping bh for a gated in-progress child,
-// mirroring the repo-level bw rule), a nested epic child (issue_type=="epic") is
-// excluded from every bucket, array order matches the input (roadmap) order, and an
-// epic present in the issues but absent from liveEpics contributes nothing.
+// TestEpicBuckets pins the full per-epic partition: bh/bo/bw/bb all come from
+// the same lanes pass (decision 477486825755: human wins overlaps, so a gated
+// in-progress child lands in bh only, never also bw), a nested epic child
+// (issue_type=="epic") is excluded from every bucket, array order matches the
+// input (roadmap) order, and an epic present in the issues but absent from
+// liveEpics contributes nothing.
 func TestEpicBuckets(t *testing.T) {
 	issues := []bd.Issue{
 		{ID: "e1.nested-epic", Parent: "e1", IssueType: "epic", Status: bd.StatusOpen, Priority: new(0)}, // excluded: nested epic
 		{ID: "e1.waiting", Parent: "e1", Status: bd.StatusOpen, Labels: []string{"human"}},               // bh
 		{ID: "e1.open", Parent: "e1", Status: bd.StatusOpen},                                             // bo
-		{ID: "e1.ip-plain", Parent: "e1", Status: bd.StatusInProgress},                                   // bw only
-		{ID: "e1.ip-gated", Parent: "e1", Status: bd.StatusInProgress, Labels: []string{"human"}},        // bw AND bh (overlap)
+		{ID: "e1.ip-plain", Parent: "e1", Status: bd.StatusInProgress},                                   // bw
+		{ID: "e1.ip-gated", Parent: "e1", Status: bd.StatusInProgress, Labels: []string{"human"}},        // bh only, not also bw
 		{ID: "e1.blocked", Parent: "e1", Status: bd.StatusBlocked},                                       // bb
 		{ID: "e2.open", Parent: "e2", Status: bd.StatusOpen},                                             // e2's own bucket
 		{ID: "e3.open", Parent: "e3", Status: bd.StatusOpen},                                             // e3 not in liveEpics: must be absent
@@ -312,8 +385,8 @@ func TestEpicBuckets(t *testing.T) {
 	if got[0].ID != "e1" || got[1].ID != "e2" {
 		t.Fatalf("order = [%s %s], want [e1 e2] — roadmap order", got[0].ID, got[1].ID)
 	}
-	if e1 := got[0]; e1.BH != 2 || e1.BO != 1 || e1.BW != 2 || e1.BB != 1 {
-		t.Errorf("e1 buckets = %+v, want bh=2 bo=1 bw=2 bb=1 (ip-gated overlaps bw+bh)", e1)
+	if e1 := got[0]; e1.BH != 2 || e1.BO != 1 || e1.BW != 1 || e1.BB != 1 {
+		t.Errorf("e1 buckets = %+v, want bh=2 bo=1 bw=1 bb=1 (ip-gated is bh only, not also bw)", e1)
 	}
 	if e2 := got[1]; e2.BH != 0 || e2.BO != 1 || e2.BW != 0 || e2.BB != 0 {
 		t.Errorf("e2 buckets = %+v, want bo=1 only", e2)
