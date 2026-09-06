@@ -13,7 +13,9 @@
 #   1. Discovers every directory directly under $BD_COUNTS_PROJECTS_DIR
 #      (default ~/Projects) holding .beads/last-touched or .beads/metadata.json.
 #   2. Authors com.trixi.beadwatch.plist: ProgramArguments ~/go/bin/beadwatch
-#      --all, one WatchPaths entry per discovered repo's .beads/last-touched,
+#      --all, EnvironmentVariables PATH (launchd's own PATH has no homebrew or
+#      go bin dir, and bd lives in one of those) and BD_COUNTS_PROJECTS_DIR,
+#      one WatchPaths entry per discovered repo's .beads/last-touched,
 #      StartInterval 120, ThrottleInterval 2, RunAtLoad, stderr to
 #      ~/.cache/cc-dashboard/beadwatch.log. Rewrites the file only when its
 #      content would change — in practice that means only when the discovered
@@ -44,6 +46,11 @@ OLD_PLIST="$LAUNCH_AGENTS_DIR/$OLD_LABEL.plist"
 BEADWATCH_BIN="$HOME_DIR/go/bin/beadwatch"
 LOG_PATH="$HOME_DIR/.cache/cc-dashboard/beadwatch.log"
 UID_NUM="$(id -u)"
+# launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin — bd lives at
+# /opt/homebrew/bin/bd, so beadwatch cannot find it without this. $HOME_DIR is
+# expanded here, at write time, into a literal path — not left as "$HOME" for
+# launchd to expand, since launchd does not expand it.
+AGENT_PATH="/opt/homebrew/bin:/usr/local/bin:$HOME_DIR/go/bin:/usr/bin:/bin"
 
 CHECK=0
 while [ $# -gt 0 ]; do
@@ -100,6 +107,10 @@ build_new_plist() {
   printf '        <string>%s</string>\n' "$BEADWATCH_BIN"
   printf '        <string>--all</string>\n'
   printf '    </array>\n'
+  printf '    <key>EnvironmentVariables</key>\n    <dict>\n'
+  printf '        <key>PATH</key>\n        <string>%s</string>\n' "$AGENT_PATH"
+  printf '        <key>BD_COUNTS_PROJECTS_DIR</key>\n        <string>%s</string>\n' "$PROJECTS_DIR"
+  printf '    </dict>\n'
   printf '    <key>WatchPaths</key>\n    <array>\n'
   for _r in "$@"; do
     printf '        <string>%s/.beads/last-touched</string>\n' "$_r"
