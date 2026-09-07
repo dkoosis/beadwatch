@@ -30,17 +30,25 @@ const (
 	DepRelatesTo   DepType = "relates_to"
 )
 
-// Issue is the plain input Lanes partitions from — the four bd.Issue fields
-// the lane derivation actually reads (ID, Status, Labels, Metadata), lifted
-// into a type pulse owns so importing pulse doesn't drag in bd.Issue's much
-// larger shape (Title, Priority, timestamps, and bd's client/store surface
-// behind it). internal/insight is the adapter that builds these from a real
-// bd.Issue.
+// Issue is the plain input Lanes partitions from — the bd.Issue fields the
+// lane derivation actually reads (ID, Status, Labels, Metadata, IssueType,
+// AwaitType), lifted into a type pulse owns so importing pulse doesn't drag
+// in bd.Issue's much larger shape (Title, Priority, timestamps, and bd's
+// client/store surface behind it). internal/insight is the adapter that
+// builds these from a real bd.Issue.
 type Issue struct {
-	ID       string
-	Status   Status
-	Labels   []string
-	Metadata map[string]any
+	ID     string
+	Status Status
+	Labels []string
+	// IssueType is bd's issue_type; "gate" identifies a formal wait-condition
+	// issue created by `bd gate create`, distinguishing it from an ordinary
+	// issue that happens to carry an AwaitType.
+	IssueType string
+	// AwaitType is set only on a gate issue (IssueType=="gate"): what it waits
+	// on — "human", "timer", "gh:run", "gh:pr", or "bead". Only "human" routes
+	// a bead this gate blocks into LaneWaiting (bw-avk).
+	AwaitType string
+	Metadata  map[string]any
 }
 
 // DepEdge is the plain input Lanes partitions dependency edges from — the

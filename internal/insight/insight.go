@@ -39,10 +39,12 @@ func Lanes(issues []bd.Issue, deps []bd.DepEdge) map[string]Lane {
 	pIssues := make([]pulse.Issue, len(issues))
 	for i := range issues {
 		pIssues[i] = pulse.Issue{
-			ID:       issues[i].ID,
-			Status:   pulse.Status(issues[i].Status),
-			Labels:   issues[i].Labels,
-			Metadata: issues[i].Metadata,
+			ID:        issues[i].ID,
+			Status:    pulse.Status(issues[i].Status),
+			Labels:    issues[i].Labels,
+			Metadata:  issues[i].Metadata,
+			IssueType: issues[i].IssueType,
+			AwaitType: issues[i].AwaitType,
 		}
 	}
 	pDeps := make([]pulse.DepEdge, len(deps))

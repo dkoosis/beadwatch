@@ -25,11 +25,52 @@ const humanLabel = "human"
 // tolerated defensively.
 const reviewNeededKey = "review_needed"
 
-// humanGate classifies a bead's human-gate state from its full issue record: a
-// DECISION (carries the "human" label) or a REVIEW (review_needed=="true"). A
-// bead carrying both is a decision — the stronger "needs a human call" signal.
-// A bead with neither is neither (claimable).
-func humanGate(iss *Issue) (decision, review bool) {
+// issueTypeGate is bd's issue_type value for a gate issue (bd gate create) —
+// an async wait condition that blocks another issue via an ordinary "blocks"
+// dependency edge until it is resolved and closed.
+const issueTypeGate = "gate"
+
+// gateAwaitHuman is the bd gate await_type value for a human decision gate —
+// bd's formal async-gate primitive, alongside the legacy "human" label. Only
+// this await type routes a bead an open gate blocks into LaneWaiting; bd's
+// other await types (timer, gh:run, gh:pr, bead) stay ordinary blockers
+// (bw-avk).
+const gateAwaitHuman = "human"
+
+// isHumanGateIssue reports whether iss is an unresolved bd human gate: a
+// "gate" issue awaiting "human", still open. A closed gate has already been
+// resolved (bd gate resolve, or a manual close) and blocks nothing.
+func isHumanGateIssue(iss *Issue) bool {
+	return iss != nil && iss.IssueType == issueTypeGate && iss.AwaitType == gateAwaitHuman && iss.Status != StatusClosed
+}
+
+// humanGateBlocked marks every bead an open bd human gate blocks: it walks
+// the "blocks" edges and flags the dependent bead when the target is an open
+// human gate issue (bw-avk). Shares the deps+idx scan blockerCounts runs;
+// kept as its own pass so blockerCounts stays a plain tally.
+func humanGateBlocked(deps []DepEdge, idx map[string]Issue) map[string]bool {
+	gated := map[string]bool{}
+	for _, d := range deps {
+		if d.Type != DepBlocks {
+			continue
+		}
+		if gate, ok := idx[d.DependsOnID]; ok && isHumanGateIssue(&gate) {
+			gated[d.IssueID] = true
+		}
+	}
+	return gated
+}
+
+// humanGate classifies a bead's human-gate state from its full issue record
+// and whether an open bd human gate blocks it (humanGateBlocked, bw-avk): a
+// DECISION (the "human" label, or an open human gate) or a REVIEW
+// (review_needed=="true"). A bead carrying both a decision signal and a
+// review signal is a decision — the stronger "needs a human call" signal. A
+// bead with neither is neither (claimable).
+func humanGate(iss *Issue, gated bool) (decision, review bool) {
+	if gated {
+		return true, false
+	}
 	if iss == nil {
 		return false, false
 	}
@@ -43,9 +84,10 @@ func humanGate(iss *Issue) (decision, review bool) {
 }
 
 // isHumanGated reports whether a bead is parked on a human (decision or
-// review) — the gate arm of LaneOf.
-func isHumanGated(iss *Issue) bool {
-	d, r := humanGate(iss)
+// review) — the gate arm of LaneOf. gated is the bead's humanGateBlocked
+// entry: whether an open bd human gate blocks it.
+func isHumanGated(iss *Issue, gated bool) bool {
+	d, r := humanGate(iss, gated)
 	return d || r
 }
 
@@ -127,10 +169,11 @@ func LaneOf(status Status, gated, hasBlocker bool) Lane {
 func Lanes(issues []Issue, deps []DepEdge) map[string]Lane {
 	idx := indexIssues(issues)
 	openBlockers := blockerCounts(deps, idx)
+	gateBlocked := humanGateBlocked(deps, idx)
 	lanes := make(map[string]Lane, len(issues))
 	for i := range issues {
 		iss := &issues[i]
-		if l := LaneOf(iss.Status, isHumanGated(iss), openBlockers[iss.ID] > 0); l != LaneNone {
+		if l := LaneOf(iss.Status, isHumanGated(iss, gateBlocked[iss.ID]), openBlockers[iss.ID] > 0); l != LaneNone {
 			lanes[iss.ID] = l
 		}
 	}
