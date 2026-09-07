@@ -176,10 +176,107 @@ func TestHumanGate(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			d, r := humanGate(&c.iss)
+			d, r := humanGate(&c.iss, false)
 			if d != c.wantDecision || r != c.wantReview {
 				t.Errorf("humanGate = (%v,%v), want (%v,%v)", d, r, c.wantDecision, c.wantReview)
 			}
 		})
 	}
+	t.Run("gated wins over a plain issue", func(t *testing.T) {
+		d, r := humanGate(&Issue{ID: "a"}, true)
+		if !d || r {
+			t.Errorf("humanGate(plain, gated=true) = (%v,%v), want (true,false)", d, r)
+		}
+	})
+}
+
+// TestIsHumanGateIssue pins bw-avk's gate-recognition rule: a bead only reads
+// as an unresolved human gate when it is a "gate" issue, awaiting "human",
+// and still open. bd's other await types (timer, gh:run, gh:pr, bead) and a
+// closed gate must not qualify.
+func TestIsHumanGateIssue(t *testing.T) {
+	cases := []struct {
+		name string
+		iss  *Issue
+		want bool
+	}{
+		{"nil", nil, false},
+		{"open human gate", &Issue{IssueType: "gate", AwaitType: "human", Status: StatusOpen}, true},
+		{"closed gate blocks nothing", &Issue{IssueType: "gate", AwaitType: "human", Status: StatusClosed}, false},
+		{"await timer is not human", &Issue{IssueType: "gate", AwaitType: "timer", Status: StatusOpen}, false},
+		{"await gh:run is not human", &Issue{IssueType: "gate", AwaitType: "gh:run", Status: StatusOpen}, false},
+		{"await gh:pr is not human", &Issue{IssueType: "gate", AwaitType: "gh:pr", Status: StatusOpen}, false},
+		{"await bead is not human", &Issue{IssueType: "gate", AwaitType: "bead", Status: StatusOpen}, false},
+		{"not a gate issue_type", &Issue{IssueType: "task", AwaitType: "human", Status: StatusOpen}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isHumanGateIssue(c.iss); got != c.want {
+				t.Errorf("isHumanGateIssue(%+v) = %v, want %v", c.iss, got, c.want)
+			}
+		})
+	}
+}
+
+// TestHumanGateBlocked pins bw-avk's blocker-scan: a bead is flagged only
+// when a "blocks" edge points at an open human gate; a closed gate, a
+// non-human await type, or a non-blocks edge type must not flag it.
+func TestHumanGateBlocked(t *testing.T) {
+	idx := map[string]Issue{
+		"gate-open-human":   {ID: "gate-open-human", IssueType: "gate", AwaitType: "human", Status: StatusOpen},
+		"gate-closed-human": {ID: "gate-closed-human", IssueType: "gate", AwaitType: "human", Status: StatusClosed},
+		"gate-open-timer":   {ID: "gate-open-timer", IssueType: "gate", AwaitType: "timer", Status: StatusOpen},
+		"ordinary":          {ID: "ordinary", Status: StatusOpen},
+	}
+	deps := []DepEdge{
+		{IssueID: "bead-a", DependsOnID: "gate-open-human", Type: DepBlocks},
+		{IssueID: "bead-b", DependsOnID: "gate-closed-human", Type: DepBlocks},
+		{IssueID: "bead-c", DependsOnID: "gate-open-timer", Type: DepBlocks},
+		{IssueID: "bead-d", DependsOnID: "ordinary", Type: DepBlocks},
+		{IssueID: "bead-e", DependsOnID: "gate-open-human", Type: DepParentChild}, // not a blocks edge
+	}
+	got := humanGateBlocked(deps, idx)
+	want := map[string]bool{"bead-a": true}
+	if len(got) != len(want) || !got["bead-a"] {
+		t.Errorf("humanGateBlocked = %v, want %v", got, want)
+	}
+}
+
+// TestLanesRecognizesBdGate pins bw-avk's three acceptance criteria directly:
+// a bead blocked by an open human gate (no label) reads as LaneWaiting; the
+// same bead with the gate closed reads as LaneOpen; a bead carrying only the
+// legacy "human" label still reads as LaneWaiting — the two signals are OR'd,
+// never swapped.
+func TestLanesRecognizesBdGate(t *testing.T) {
+	t.Run("open gate, no label -> waiting", func(t *testing.T) {
+		issues := []Issue{
+			{ID: "bead", Status: StatusOpen},
+			{ID: "gate", Status: StatusOpen, IssueType: "gate", AwaitType: "human"},
+		}
+		deps := []DepEdge{{IssueID: "bead", DependsOnID: "gate", Type: DepBlocks}}
+		lanes := Lanes(issues, deps)
+		if lanes["bead"] != LaneWaiting {
+			t.Errorf("lanes[bead] = %v, want LaneWaiting", lanes["bead"])
+		}
+	})
+	t.Run("closed gate -> blocks nothing", func(t *testing.T) {
+		issues := []Issue{
+			{ID: "bead", Status: StatusOpen},
+			{ID: "gate", Status: StatusClosed, IssueType: "gate", AwaitType: "human"},
+		}
+		deps := []DepEdge{{IssueID: "bead", DependsOnID: "gate", Type: DepBlocks}}
+		lanes := Lanes(issues, deps)
+		if lanes["bead"] != LaneOpen {
+			t.Errorf("lanes[bead] = %v, want LaneOpen", lanes["bead"])
+		}
+	})
+	t.Run("human label alone still routes to waiting", func(t *testing.T) {
+		issues := []Issue{
+			{ID: "bead", Status: StatusOpen, Labels: []string{"human"}},
+		}
+		lanes := Lanes(issues, nil)
+		if lanes["bead"] != LaneWaiting {
+			t.Errorf("lanes[bead] = %v, want LaneWaiting", lanes["bead"])
+		}
+	})
 }

@@ -66,8 +66,13 @@ type Issue struct {
 	// Priority is 0–4 (0=highest) when bd emits the field, nil when bd omits it.
 	// *int (not plain int) so an absent priority decodes to nil rather than
 	// collapsing into a false P0.
-	Priority        *int      `json:"priority"`
-	IssueType       string    `json:"issue_type"`
+	Priority  *int   `json:"priority"`
+	IssueType string `json:"issue_type"`
+	// AwaitType is set only on a gate issue (IssueType=="gate"): what it waits
+	// on — "human", "timer", "gh:run", "gh:pr", or "bead" (bd gate create
+	// --await <type>). pulse reads it to recognize a formal human gate
+	// alongside the legacy "human" label (bw-avk).
+	AwaitType       string    `json:"await_type,omitempty"`
 	Parent          string    `json:"parent,omitempty"`
 	Description     string    `json:"description,omitempty"`
 	Design          string    `json:"design,omitempty"`

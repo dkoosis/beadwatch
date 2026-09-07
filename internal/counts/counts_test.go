@@ -176,6 +176,70 @@ func TestComputeRowPartitionSumsToLiveBeads(t *testing.T) {
 	}
 }
 
+// TestComputeRowRecognizesBdGate pins bw-avk's three acceptance criteria at
+// the counts.json row level: a bead blocked by an open bd human gate — issue
+// bd gate create produces (issue_type "gate", await_type "human") — and
+// carrying no "human" label, is counted into the ◆ waiting bucket (BH);
+// closing the gate returns it to ○ open (BO); a bead with only the legacy
+// "human" label, no gate, still lands in BH — the two signals OR, never swap.
+func TestComputeRowRecognizesBdGate(t *testing.T) {
+	t.Run("open gate, no label -> waiting=1", func(t *testing.T) {
+		src := &fakeSource{
+			issues: []bd.Issue{
+				{ID: "bead", Status: bd.StatusOpen},
+				{ID: "gate", Status: bd.StatusOpen, IssueType: "gate", AwaitType: "human"},
+			},
+			deps: []bd.DepEdge{{IssueID: "bead", DependsOnID: "gate", Type: bd.DepBlocks}},
+		}
+		row, err := computeRow(context.Background(), src, "/tmp/not-a-repo-xyz")
+		if err != nil {
+			t.Fatalf("computeRow: %v", err)
+		}
+		// bo=1 is the gate issue itself, and that is a DEFECT this test pins
+		// rather than blesses (bw-xlk): nothing anywhere filters
+		// issue_type=="gate" as a work item, so a synthetic wait condition
+		// nobody can claim counts as ready work — and pickNext can name it
+		// Next. Pre-existing, not introduced here; this change only made it
+		// visible by giving gates a reason to exist. When bw-xlk lands, this
+		// expectation becomes bo=0 and that is the fix, not a regression.
+		// What this line does assert today: the bead under test must NOT also
+		// land in bo — the gate routes it to bh, which is bw-avk's whole point.
+		if row.BH != 1 || row.BO != 1 {
+			t.Errorf("bh=%d bo=%d, want bh=1 bo=1 — the gated bead must count as waiting, not open", row.BH, row.BO)
+		}
+	})
+	t.Run("gate closed -> blocks nothing, waiting=0", func(t *testing.T) {
+		src := &fakeSource{
+			issues: []bd.Issue{
+				{ID: "bead", Status: bd.StatusOpen},
+				{ID: "gate", Status: bd.StatusClosed, IssueType: "gate", AwaitType: "human"},
+			},
+			deps: []bd.DepEdge{{IssueID: "bead", DependsOnID: "gate", Type: bd.DepBlocks}},
+		}
+		row, err := computeRow(context.Background(), src, "/tmp/not-a-repo-xyz")
+		if err != nil {
+			t.Fatalf("computeRow: %v", err)
+		}
+		if row.BH != 0 || row.BO != 1 {
+			t.Errorf("bh=%d bo=%d, want bh=0 bo=1 — a closed gate blocks nothing", row.BH, row.BO)
+		}
+	})
+	t.Run("human label alone, no gate -> waiting=1", func(t *testing.T) {
+		src := &fakeSource{
+			issues: []bd.Issue{
+				{ID: "bead", Status: bd.StatusOpen, Labels: []string{"human"}},
+			},
+		}
+		row, err := computeRow(context.Background(), src, "/tmp/not-a-repo-xyz")
+		if err != nil {
+			t.Fatalf("computeRow: %v", err)
+		}
+		if row.BH != 1 {
+			t.Errorf("bh=%d, want 1 — the label leg stays live with no behavior change", row.BH)
+		}
+	})
+}
+
 // --- pickNext: the four-rung "what's next" cascade (st-3wp.1) ---
 
 // TestPickNextRung1ClaimedInProgressWinsRepoWide: rung 1 is repo-wide (claimed work
