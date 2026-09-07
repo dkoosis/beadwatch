@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -184,24 +185,63 @@ func nextPending(m mode, mtimeChanged bool, err error) bool {
 	return err != nil
 }
 
-// discover returns every repo root under projects with a real .beads workspace (a
-// last-touched stamp or a metadata.json), matching the shell's discovery.
+// discover returns every repo root under projects with a real .beads workspace,
+// plus any BD_COUNTS_EXTRA_REPOS entries (sd-3wp.15) — matching the shell's
+// discovery (tool-install-launchd.sh's discover_repos).
 func discover(projects string) []string {
-	entries, err := os.ReadDir(projects)
-	if err != nil {
-		return nil
-	}
 	var roots []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	entries, err := os.ReadDir(projects)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			root := filepath.Join(projects, e.Name())
+			if isBeadsRepo(root) {
+				roots = append(roots, root)
+			}
 		}
-		root := filepath.Join(projects, e.Name())
-		if hasFile(root, ".beads", "last-touched") || hasFile(root, ".beads", "metadata.json") {
+	}
+	for _, root := range extraRepos() {
+		if !slices.Contains(roots, root) {
 			roots = append(roots, root)
 		}
 	}
 	return roots
+}
+
+// isBeadsRepo reports whether root holds a real bd workspace: a last-touched
+// stamp or metadata.json (the embedded-Dolt shape), or a bare config.yaml (a
+// server/remote-backed store — loto's shape, sd-3wp.15: no local store file
+// ever gets written there, but bd status against it works). Any one of the
+// three is sufficient; a directory with none of them is not a bd repo.
+func isBeadsRepo(root string) bool {
+	return hasFile(root, ".beads", "last-touched") ||
+		hasFile(root, ".beads", "metadata.json") ||
+		hasFile(root, ".beads", "config.yaml")
+}
+
+// extraRepos returns repo roots named in BD_COUNTS_EXTRA_REPOS (colon-separated
+// absolute paths), for a bd repo that lives outside projectsDir's one-level scan —
+// chezmoi's dotfiles checkout at ~/.local/share/chezmoi is the known case
+// (sd-3wp.15). Each entry names a repo root directly, not a directory of repos.
+// An entry that is not actually a bd repo (typo, moved, deleted) is dropped
+// rather than added as a broken target.
+func extraRepos() []string {
+	v := os.Getenv("BD_COUNTS_EXTRA_REPOS")
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(v, ":") {
+		if p == "" {
+			continue
+		}
+		if isBeadsRepo(p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func hasFile(parts ...string) bool {

@@ -11,7 +11,13 @@
 #
 # What it does, idempotent:
 #   1. Discovers every directory directly under $BD_COUNTS_PROJECTS_DIR
-#      (default ~/Projects) holding .beads/last-touched or .beads/metadata.json.
+#      (default ~/Projects) holding .beads/last-touched, .beads/metadata.json,
+#      or a bare .beads/config.yaml (a server/remote-backed store — loto's
+#      shape: no local store file is ever written there, sd-3wp.15) — plus
+#      any repo named in $BD_COUNTS_EXTRA_REPOS (colon-separated repo roots,
+#      each checked before being watched) for a bd repo that lives outside
+#      PROJECTS_DIR's one-level scan entirely (chezmoi's dotfiles checkout at
+#      ~/.local/share/chezmoi is the known case).
 #   2. Authors com.trixi.beadwatch.plist: ProgramArguments ~/go/bin/beadwatch
 #      with NO arguments — bare invocation is beadwatch's changed-only mode
 #      (internal/counts/refresh.go's modeChanged: skips any repo whose
@@ -20,8 +26,11 @@
 #      this machine's 23 repos — too slow for a bd write to reach counts.json
 #      inside the 10s AC, and the wrong mode for a per-repo wake signal
 #      anyway. EnvironmentVariables PATH (launchd's own PATH has no homebrew or
-#      go bin dir, and bd lives in one of those) and BD_COUNTS_PROJECTS_DIR,
-#      one WatchPaths entry per discovered repo's .beads/last-touched,
+#      go bin dir, and bd lives in one of those), BD_COUNTS_PROJECTS_DIR, and
+#      BD_COUNTS_EXTRA_REPOS when set (so the beadwatch process's own
+#      discover() re-checks the same extra repos every run, not just at
+#      install time) — one WatchPaths entry per discovered repo's real marker
+#      file (last-touched, else metadata.json, else config.yaml),
 #      StartInterval 120, ThrottleInterval 2, RunAtLoad, stderr to
 #      ~/.cache/cc-dashboard/beadwatch.log. Rewrites the file only when its
 #      content would change — in practice that means only when the discovered
@@ -99,19 +108,47 @@ fi
 
 # --- discover repos ----------------------------------------------------------
 # Direct children only — matches the shape of the bd-counts template plist
-# this replaces (one WatchPaths entry per top-level ~/Projects dir).
+# this replaces (one WatchPaths entry per top-level ~/Projects dir). A repo is
+# any dir carrying .beads/last-touched, .beads/metadata.json (both the
+# embedded-Dolt shapes), OR .beads/config.yaml (a server/remote-backed store —
+# loto's shape: no local store file is ever written there, sd-3wp.15) —
+# matching internal/counts/refresh.go's isBeadsRepo.
+is_beads_repo() {
+  [ -f "$1/.beads/last-touched" ] || [ -f "$1/.beads/metadata.json" ] || [ -f "$1/.beads/config.yaml" ]
+}
+# repo_marker <dir> — the one existing marker file under <dir>/.beads, in the
+# same preference order as is_beads_repo, for a WatchPaths entry that actually
+# exists on disk.
+repo_marker() {
+  if   [ -f "$1/.beads/last-touched" ]; then printf '%s\n' "$1/.beads/last-touched"
+  elif [ -f "$1/.beads/metadata.json" ]; then printf '%s\n' "$1/.beads/metadata.json"
+  else printf '%s\n' "$1/.beads/config.yaml"
+  fi
+}
 discover_repos() {
   [ -d "$PROJECTS_DIR" ] || return 0
   find "$PROJECTS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while IFS= read -r d; do
-    if [ -f "$d/.beads/last-touched" ] || [ -f "$d/.beads/metadata.json" ]; then
-      printf '%s\n' "$d"
-    fi
+    is_beads_repo "$d" && printf '%s\n' "$d"
   done | sort
 }
 REPOS=()
 while IFS= read -r _r; do
   [ -n "$_r" ] && REPOS+=("$_r")
 done < <(discover_repos)
+# Repos outside PROJECTS_DIR's one-level scan entirely — chezmoi's dotfiles
+# checkout at ~/.local/share/chezmoi is the known case (sd-3wp.15). Named via
+# BD_COUNTS_EXTRA_REPOS (colon-separated repo roots, each checked before being
+# added so a stale/mistyped entry is dropped rather than watched as broken).
+EXTRA_REPOS_RAW="${BD_COUNTS_EXTRA_REPOS:-}"
+if [ -n "$EXTRA_REPOS_RAW" ]; then
+  _old_ifs="$IFS"; IFS=':'
+  for _er in $EXTRA_REPOS_RAW; do
+    IFS="$_old_ifs"
+    [ -n "$_er" ] || continue
+    is_beads_repo "$_er" && REPOS+=("$_er")
+  done
+  IFS="$_old_ifs"
+fi
 
 echo "repos to watch (under $PROJECTS_DIR):"
 if [ "${#REPOS[@]}" -eq 0 ]; then
@@ -138,10 +175,13 @@ build_new_plist() {
   printf '    <key>EnvironmentVariables</key>\n    <dict>\n'
   printf '        <key>PATH</key>\n        <string>%s</string>\n' "$AGENT_PATH"
   printf '        <key>BD_COUNTS_PROJECTS_DIR</key>\n        <string>%s</string>\n' "$PROJECTS_DIR"
+  if [ -n "$EXTRA_REPOS_RAW" ]; then
+    printf '        <key>BD_COUNTS_EXTRA_REPOS</key>\n        <string>%s</string>\n' "$EXTRA_REPOS_RAW"
+  fi
   printf '    </dict>\n'
   printf '    <key>WatchPaths</key>\n    <array>\n'
   for _r in "$@"; do
-    printf '        <string>%s/.beads/last-touched</string>\n' "$_r"
+    printf '        <string>%s</string>\n' "$(repo_marker "$_r")"
   done
   printf '    </array>\n'
   printf '    <key>StartInterval</key>\n    <integer>120</integer>\n'
