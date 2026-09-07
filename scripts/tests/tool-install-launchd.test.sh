@@ -85,9 +85,9 @@ lacks "$FHOME/go/bin:/opt/homebrew" "$CONTENT" \
 has "<key>BD_COUNTS_PROJECTS_DIR</key>" "$CONTENT" "EnvironmentVariables carries the BD_COUNTS_PROJECTS_DIR key"
 has "<string>$PROJDIR</string>" "$CONTENT" "BD_COUNTS_PROJECTS_DIR is set to the discovered projects dir"
 lacks '<string>$HOME' "$CONTENT" "PATH is expanded at write time, not left as a literal \$HOME for launchd"
-has "$PROJDIR/repo-a/.beads/last-touched" "$CONTENT" "WatchPaths carries repo-a"
-has "$PROJDIR/repo-b/.beads/last-touched" "$CONTENT" "WatchPaths carries repo-b"
-WPN="$(grep -c '.beads/last-touched</string>' "$NEW_PLIST" 2>/dev/null || echo 0)"
+has "$PROJDIR/repo-a/.beads/last-touched" "$CONTENT" "WatchPaths carries repo-a's real marker (last-touched)"
+has "$PROJDIR/repo-b/.beads/metadata.json" "$CONTENT" "WatchPaths carries repo-b's real marker (metadata.json, since repo-b has no last-touched)"
+WPN="$(awk '/<key>WatchPaths<\/key>/{f=1;next} f && /<\/array>/{exit} f && /<string>/' "$NEW_PLIST" | grep -c '<string>')"
 [ "$WPN" -eq 2 ] && ok "WatchPaths has exactly one entry per discovered repo, nothing else" \
                   || bad "WatchPaths entry count" "found $WPN, want 2"
 
@@ -182,6 +182,36 @@ has "no beadwatch binary at $TMP/nowhere/beadwatch" "$OUT11" "the refusal names 
                      || ok "no plist is written on refusal"
 OUT12="$(run_gobin "$TMP/nowhere" --check)"; RC12=$?
 [ "$RC12" -eq 1 ] && ok "--check still reports rather than refusing" || bad "--check still reports" "got $RC12: $OUT12"
+
+echo "a config.yaml-only repo (loto's shape) is discovered and watched (sd-3wp.15):"
+mkdir -p "$PROJDIR/config-only/.beads"
+: > "$PROJDIR/config-only/.beads/config.yaml"   # no last-touched, no metadata.json
+rm -f "$NEW_PLIST"
+OUT13="$(run)"; RC13=$?
+[ "$RC13" -eq 0 ] && ok "install exits 0 with a config.yaml-only repo present" \
+                   || bad "install exits 0" "got $RC13: $OUT13"
+CONTENT_CO="$(cat "$NEW_PLIST" 2>/dev/null)"
+has "$PROJDIR/config-only" "$OUT13" "prints config-only in the repo list it would watch"
+has "$PROJDIR/config-only/.beads/config.yaml" "$CONTENT_CO" \
+    "WatchPaths carries config-only's real marker (config.yaml)"
+
+echo "BD_COUNTS_EXTRA_REPOS adds a repo outside PROJECTS_DIR entirely (chezmoi's shape, sd-3wp.15):"
+EXTRA="$TMP/extra-repo"
+mkdir -p "$EXTRA/.beads"
+: > "$EXTRA/.beads/metadata.json"
+MISSING_EXTRA="$TMP/does-not-exist"
+rm -f "$NEW_PLIST"
+OUT14="$(HOME="$FHOME" BD_COUNTS_PROJECTS_DIR="$PROJDIR" BD_COUNTS_EXTRA_REPOS="$EXTRA:$MISSING_EXTRA" \
+         PATH="$STUBBIN:$PATH" GOBIN="" bash "$SUT" 2>&1)"; RC14=$?
+[ "$RC14" -eq 0 ] && ok "install exits 0 with BD_COUNTS_EXTRA_REPOS set" \
+                   || bad "install exits 0" "got $RC14: $OUT14"
+has "$EXTRA" "$OUT14" "prints the extra repo in the repo list it would watch"
+lacks "$MISSING_EXTRA" "$OUT14" "a non-repo path in BD_COUNTS_EXTRA_REPOS is dropped, not watched"
+CONTENT_EX="$(cat "$NEW_PLIST" 2>/dev/null)"
+has "$EXTRA/.beads/metadata.json" "$CONTENT_EX" "WatchPaths carries the extra repo's marker"
+has "<key>BD_COUNTS_EXTRA_REPOS</key>" "$CONTENT_EX" "EnvironmentVariables carries BD_COUNTS_EXTRA_REPOS"
+has "<string>$EXTRA:$MISSING_EXTRA</string>" "$CONTENT_EX" \
+    "BD_COUNTS_EXTRA_REPOS is passed through verbatim so the beadwatch process re-checks it itself"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -404,6 +405,55 @@ func TestRefreshExplicitDirs(t *testing.T) {
 	}
 	if _, ok := bdcounts.NewReaderAt(filepath.Join(cache, "counts.json")).Lookup(root); !ok {
 		t.Errorf("explicit dir %s not in output", root)
+	}
+}
+
+// mkConfigOnlyRepo creates projects/<name>/.beads/config.yaml with no last-touched
+// and no metadata.json — the shape of a server/remote-backed bd store (loto,
+// sd-3wp.15) that discover() used to skip entirely.
+func mkConfigOnlyRepo(t *testing.T, projects, name string) string {
+	t.Helper()
+	beads := filepath.Join(projects, name, ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(beads, "config.yaml"), []byte("issue-prefix: x\n"), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	return filepath.Join(projects, name)
+}
+
+// TestDiscoverFindsConfigOnlyRepo is the sd-3wp.15 regression: a repo whose .beads
+// holds only config.yaml (no last-touched, no metadata.json — loto's shape) must
+// still be discovered, not silently skipped.
+func TestDiscoverFindsConfigOnlyRepo(t *testing.T) {
+	projects := t.TempDir()
+	root := mkConfigOnlyRepo(t, projects, "config-only")
+
+	got := discover(projects)
+	if !slices.Contains(got, root) {
+		t.Errorf("discover(%q) = %v, want to contain %q", projects, got, root)
+	}
+}
+
+// TestDiscoverHonorsExtraRepos is the sd-3wp.15 regression for a repo that lives
+// outside projectsDir's one-level scan entirely (chezmoi's dotfiles checkout at
+// ~/.local/share/chezmoi is the known case) — named via BD_COUNTS_EXTRA_REPOS, a
+// colon-separated list of repo roots, each checked before being added so a stale
+// or mistyped entry is dropped rather than surfaced as a broken target.
+func TestDiscoverHonorsExtraRepos(t *testing.T) {
+	projects := t.TempDir()
+	extraParent := t.TempDir()
+	realRoot := mkRepo(t, extraParent, "chezmoi")
+	missing := filepath.Join(extraParent, "does-not-exist")
+
+	t.Setenv("BD_COUNTS_EXTRA_REPOS", realRoot+":"+missing)
+	got := discover(projects)
+	if !slices.Contains(got, realRoot) {
+		t.Errorf("discover(%q) = %v, want to contain extra repo %q", projects, got, realRoot)
+	}
+	if slices.Contains(got, missing) {
+		t.Errorf("discover(%q) = %v, want NOT to contain non-repo path %q", projects, got, missing)
 	}
 }
 
