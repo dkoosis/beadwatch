@@ -139,13 +139,28 @@ done < <(discover_repos)
 # checkout at ~/.local/share/chezmoi is the known case (sd-3wp.15). Named via
 # BD_COUNTS_EXTRA_REPOS (colon-separated repo roots, each checked before being
 # added so a stale/mistyped entry is dropped rather than watched as broken).
+# already_listed <path> — true when <path> is already in REPOS, so an extra
+# entry that also sits under PROJECTS_DIR is not watched (and refreshed)
+# twice. Mirrors the slices.Contains guard in refresh.go's discover(). The
+# count check guards the expansion: under `set -u`, bash 3.2 errors on
+# "${REPOS[@]}" when the array is empty (macOS ships bash 3.2).
+already_listed() {
+  [ "${#REPOS[@]}" -gt 0 ] || return 1
+  local _r
+  for _r in "${REPOS[@]}"; do
+    [ "$_r" = "$1" ] && return 0
+  done
+  return 1
+}
 EXTRA_REPOS_RAW="${BD_COUNTS_EXTRA_REPOS:-}"
 if [ -n "$EXTRA_REPOS_RAW" ]; then
   _old_ifs="$IFS"; IFS=':'
   for _er in $EXTRA_REPOS_RAW; do
     IFS="$_old_ifs"
     [ -n "$_er" ] || continue
-    is_beads_repo "$_er" && REPOS+=("$_er")
+    if is_beads_repo "$_er" && ! already_listed "$_er"; then
+      REPOS+=("$_er")
+    fi
   done
   IFS="$_old_ifs"
 fi
