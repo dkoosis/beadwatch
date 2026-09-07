@@ -11,3 +11,6 @@
 # lint gate build/cache artifacts (bw-ajp)
 /bin/
 /.golangci-cache/
+
+# session-local hook scratch (wrap markers, capture log)
+/.claude/tmp/
