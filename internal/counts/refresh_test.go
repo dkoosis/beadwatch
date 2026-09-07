@@ -444,13 +444,13 @@ func TestDiscoverFindsConfigOnlyRepo(t *testing.T) {
 func TestDiscoverHonorsExtraRepos(t *testing.T) {
 	projects := t.TempDir()
 	extraParent := t.TempDir()
-	real := mkRepo(t, extraParent, "chezmoi")
+	realRoot := mkRepo(t, extraParent, "chezmoi")
 	missing := filepath.Join(extraParent, "does-not-exist")
 
-	t.Setenv("BD_COUNTS_EXTRA_REPOS", real+":"+missing)
+	t.Setenv("BD_COUNTS_EXTRA_REPOS", realRoot+":"+missing)
 	got := discover(projects)
-	if !slices.Contains(got, real) {
-		t.Errorf("discover(%q) = %v, want to contain extra repo %q", projects, got, real)
+	if !slices.Contains(got, realRoot) {
+		t.Errorf("discover(%q) = %v, want to contain extra repo %q", projects, got, realRoot)
 	}
 	if slices.Contains(got, missing) {
 		t.Errorf("discover(%q) = %v, want NOT to contain non-repo path %q", projects, got, missing)

@@ -226,19 +226,28 @@ func isBeadsRepo(root string) bool {
 // chezmoi's dotfiles checkout at ~/.local/share/chezmoi is the known case
 // (sd-3wp.15). Each entry names a repo root directly, not a directory of repos.
 // An entry that is not actually a bd repo (typo, moved, deleted) is dropped
-// rather than added as a broken target.
+// rather than added as a broken target. An entry that is not a clean absolute
+// path is rejected outright (logged, then skipped) rather than passed on to
+// isBeadsRepo/os.Stat — BD_COUNTS_EXTRA_REPOS is user-supplied, so a relative
+// or unclean path is treated the way this repo treats other user-supplied
+// paths (see bdcounts.go's filepath.Clean).
 func extraRepos() []string {
 	v := os.Getenv("BD_COUNTS_EXTRA_REPOS")
 	if v == "" {
 		return nil
 	}
 	var out []string
-	for _, p := range strings.Split(v, ":") {
+	for p := range strings.SplitSeq(v, ":") {
 		if p == "" {
 			continue
 		}
-		if isBeadsRepo(p) {
-			out = append(out, p)
+		clean := filepath.Clean(p)
+		if !filepath.IsAbs(clean) {
+			fmt.Fprintf(os.Stderr, "counts: BD_COUNTS_EXTRA_REPOS entry %q is not an absolute path — skipping\n", p)
+			continue
+		}
+		if isBeadsRepo(clean) {
+			out = append(out, clean)
 		}
 	}
 	return out
