@@ -195,8 +195,15 @@ func TestComputeRowRecognizesBdGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("computeRow: %v", err)
 		}
-		// bo=1 is the gate issue itself (open, ungated, ordinary open work) —
-		// the bead under test is what must NOT also land there.
+		// bo=1 is the gate issue itself, and that is a DEFECT this test pins
+		// rather than blesses (bw-xlk): nothing anywhere filters
+		// issue_type=="gate" as a work item, so a synthetic wait condition
+		// nobody can claim counts as ready work — and pickNext can name it
+		// Next. Pre-existing, not introduced here; this change only made it
+		// visible by giving gates a reason to exist. When bw-xlk lands, this
+		// expectation becomes bo=0 and that is the fix, not a regression.
+		// What this line does assert today: the bead under test must NOT also
+		// land in bo — the gate routes it to bh, which is bw-avk's whole point.
 		if row.BH != 1 || row.BO != 1 {
 			t.Errorf("bh=%d bo=%d, want bh=1 bo=1 — the gated bead must count as waiting, not open", row.BH, row.BO)
 		}
