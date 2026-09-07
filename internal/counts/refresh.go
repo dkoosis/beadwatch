@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"maps"
@@ -141,6 +142,8 @@ func refreshLocked(ctx context.Context, cfg *config) error {
 		nextState[root] = repoState{mtime: cur, pending: nextPending(cfg.mode, mtimeChanged, err)}
 	}
 
+	pruneAbsent(rows)
+
 	// counts.json is rewritten every run, even when no row changed: the write stamps a
 	// fresh liveness meta (last-run time + binary version) so a dead or wedged refresher
 	// shows a stale flag in the masthead instead of freezing the file indistinguishably
@@ -269,6 +272,22 @@ func readRows(path string) map[string]Row {
 	_ = json.Unmarshal(data, &rows) // malformed → empty base, rebuilt this run
 	delete(rows, bdcounts.MetaKey)  // the liveness stamp is not a repo row — re-injected on write
 	return rows
+}
+
+// pruneAbsent drops every row whose key (a repo root) no longer resolves on this
+// machine, logging each drop once. Rows are keyed by path, so a repo that moved
+// machines (sd-3wp.17: a vault page named a path that lives on a different
+// machine) or was deleted here otherwise latches in counts.json forever — nothing
+// ever revisits a row for a repo discover() stopped finding, since discover only
+// returns roots that currently exist. A row whose repo exists but lost its bd
+// store is untouched here; that is computeRow's "no counts row" case, not this one.
+func pruneAbsent(rows map[string]Row) {
+	for root := range rows {
+		if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+			delete(rows, root)
+			fmt.Fprintf(os.Stderr, "counts: dropping row for %s — path not found on this machine\n", root)
+		}
+	}
 }
 
 // writeRowsAtomic writes the rows plus the liveness meta as compact JSON via a temp

@@ -1,10 +1,13 @@
 package counts
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,6 +62,68 @@ func TestRefreshAllComputesEveryRepo(t *testing.T) {
 		if bk.Open != 1 {
 			t.Errorf("%s: bo(open) = %d, want 1 — reader/writer schema drift", root, bk.Open)
 		}
+	}
+}
+
+// TestRefreshDropsAbsentRepoRow is the sd-3wp.17 regression: a row keyed by a path
+// that does not exist on THIS machine (a repo that lives on a different machine, or
+// was deleted here) never gets revisited by discover() — nothing else would ever
+// clear it. Plant such a row directly in counts.json, then prove one refresh drops
+// it (with a log line naming the path) while a real repo's row survives and is
+// still recomputed.
+func TestRefreshDropsAbsentRepoRow(t *testing.T) {
+	projects := t.TempDir()
+	cache := t.TempDir()
+	existing := mkRepo(t, projects, "repo-a")
+	absent := filepath.Join(t.TempDir(), "does-not-exist")
+
+	outPath := filepath.Join(cache, "counts.json")
+	seed := map[string]Row{
+		existing: {Root: existing, BO: 9},
+		absent:   {Root: absent, BO: 9},
+	}
+	if err := writeRowsAtomic(outPath, seed, bdcounts.Meta{}); err != nil {
+		t.Fatalf("seed counts.json: %v", err)
+	}
+
+	origStderr := os.Stderr
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = pw
+
+	cfg := config{
+		cacheDir:  cache,
+		projects:  projects,
+		mode:      modeAll,
+		newSource: func(string) source { return oneOpenBead() },
+	}
+	refreshErr := refresh(context.Background(), &cfg)
+	pw.Close()
+	os.Stderr = origStderr
+	var logged bytes.Buffer
+	if _, err := io.Copy(&logged, pr); err != nil {
+		t.Fatalf("read stderr pipe: %v", err)
+	}
+	if refreshErr != nil {
+		t.Fatalf("refresh: %v", refreshErr)
+	}
+
+	if !strings.Contains(logged.String(), absent) {
+		t.Errorf("stderr = %q, want one log line naming the dropped path %q", logged.String(), absent)
+	}
+
+	r := bdcounts.NewReaderAt(outPath)
+	if _, ok := r.Lookup(absent); ok {
+		t.Errorf("row for absent path %s still present after refresh, want dropped", absent)
+	}
+	bk, ok := r.Lookup(existing)
+	if !ok {
+		t.Fatalf("row for existing repo %s missing after refresh, want it to survive", existing)
+	}
+	if bk.Open != 1 {
+		t.Errorf("%s: bo(open) = %d, want 1 — row should still be recomputed, not just left alone", existing, bk.Open)
 	}
 }
 
