@@ -10,6 +10,10 @@ require (
 )
 
 require (
+	github.com/dkoosis/conform v0.2.1-0.20260907030945-a05e4f4bd54a // indirect
 	github.com/google/renameio/v2 v2.0.2 // indirect
 	golang.org/x/sys v0.47.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+tool github.com/dkoosis/conform/cmd/conform
