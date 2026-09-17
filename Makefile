@@ -1,4 +1,4 @@
-.PHONY: build check install lint pack-drift race test vet
+.PHONY: build check install lint pack-drift race selfcheck test vet
 
 # Per-worktree golangci-lint cache. Concurrent worktrees (dispatch/team runs)
 # otherwise share one cache (~/.cache/golangci-lint); one worktree's cached
@@ -29,8 +29,8 @@ lint:
 vet:
 	go vet ./...
 
-# check is the full local gate: vet, then lint, then test, then build.
-check: vet lint pack-drift test build
+# check is the full local gate: vet, lint, pack-drift, test, build, then conform.
+check: vet lint pack-drift test build selfcheck
 	@echo "=== check pass ==="
 
 install:
@@ -38,3 +38,8 @@ install:
 
 pack-drift: ## Fail if the copied lintbrush pack rules drifted from upstream (network-soft)
 	@.golangci-rules/check-pack-drift.sh
+
+# Fleet gate: conform pinned as a go.mod tool dependency (go.sum-verified);
+# bumping the pin is a deliberate PR.
+selfcheck: ## Run conform (fleet SDLC checker) against this repo
+	go tool conform-to-sdlc
