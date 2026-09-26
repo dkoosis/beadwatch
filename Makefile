@@ -1,4 +1,4 @@
-.PHONY: build check install lint race test vet
+.PHONY: build check install lint pack-drift race test vet
 
 # Per-worktree golangci-lint cache. Concurrent worktrees (dispatch/team runs)
 # otherwise share one cache (~/.cache/golangci-lint); one worktree's cached
@@ -30,8 +30,11 @@ vet:
 	go vet ./...
 
 # check is the full local gate: vet, then lint, then test, then build.
-check: vet lint test build
+check: vet lint pack-drift test build
 	@echo "=== check pass ==="
 
 install:
 	go install ./cmd/beadwatch
+
+pack-drift: ## Fail if the copied lintbrush pack rules drifted from upstream (network-soft)
+	@.golangci-rules/check-pack-drift.sh
