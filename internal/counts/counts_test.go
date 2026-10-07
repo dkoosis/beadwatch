@@ -68,6 +68,9 @@ type fakeSource struct {
 	epics    []bd.EpicStatus
 	err      error
 	epicsErr error
+
+	issuePrefix string
+	prefixErr   error
 }
 
 func (f *fakeSource) List(context.Context, bd.ListOpts) ([]bd.Issue, error) {
@@ -77,6 +80,12 @@ func (f *fakeSource) Deps(context.Context, ...string) ([]bd.DepEdge, error) { re
 func (f *fakeSource) Stats(context.Context) (bd.Stats, error)               { return f.stats, nil }
 func (f *fakeSource) EpicStatus(context.Context) ([]bd.EpicStatus, error) {
 	return f.epics, f.epicsErr
+}
+func (f *fakeSource) IssuePrefix(context.Context) (string, error) {
+	if f.prefixErr != nil {
+		return "", f.prefixErr
+	}
+	return f.issuePrefix, nil
 }
 
 // TestComputeRowAssemblesBuckets pins the full row: bh/bo/bw/bb all come from

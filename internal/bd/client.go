@@ -201,6 +201,17 @@ func (c *Client) List(ctx context.Context, opts ListOpts) ([]Issue, error) {
 	return decodeIssues(out)
 }
 
+// IssuePrefix returns the repo's bead id prefix (`ccp` in `ccp-4msy`) as bd
+// stores it, from `bd config get issue_prefix`. bd keeps it in its store, not
+// in config.yaml, so this is the one place a reader can learn it.
+func (c *Client) IssuePrefix(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, "config", "get", "issue_prefix")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // Stats mirrors the summary block of `bd stats --json`: the per-status issue
 // counts. Fields bd omits stay zero; extra summary fields bd reports are
 // ignored.

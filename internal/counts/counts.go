@@ -38,13 +38,17 @@ import (
 type Row struct {
 	Root   string `json:"root"`
 	Prefix string `json:"prefix"`
-	BH     int    `json:"bh"`
-	BO     int    `json:"bo"`
-	BW     int    `json:"bw"`
-	BB     int    `json:"bb"`
-	BCl    int    `json:"bcl"`
-	BDf    int    `json:"bdf"`
-	TS     int64  `json:"ts"`
+	// IssuePrefix is the repo's bead id prefix (bw-092): a reader holding a bead
+	// id finds its repo here. Best-effort, like the epic fields: a failed read
+	// leaves it empty and refresh carries the last-good value forward.
+	IssuePrefix string `json:"issue_prefix"`
+	BH          int    `json:"bh"`
+	BO          int    `json:"bo"`
+	BW          int    `json:"bw"`
+	BB          int    `json:"bb"`
+	BCl         int    `json:"bcl"`
+	BDf         int    `json:"bdf"`
+	TS          int64  `json:"ts"`
 	// Epics is one ◆○◐● bucket row per live (non-closed) roadmap epic, roadmap
 	// order, epics[0] = the current epic. nil → JSON null when the repo has no
 	// roadmap or no live epic (no ROADMAP.md/NORTH_STAR.md, all-ghost ids, or every
@@ -124,6 +128,7 @@ type source interface {
 	Deps(ctx context.Context, ids ...string) ([]bd.DepEdge, error)
 	Stats(ctx context.Context) (bd.Stats, error)
 	EpicStatus(ctx context.Context) ([]bd.EpicStatus, error)
+	IssuePrefix(ctx context.Context) (string, error)
 }
 
 // computeRow derives one repo's row: the six buckets from bd reads folded through
@@ -171,8 +176,9 @@ func computeRow(ctx context.Context, src source, root string) (Row, error) {
 		// still resolves from those; a transient blank heals next cycle.
 		next, claimed = pickNext(issues, lanes, "", nil)
 	}
+	issuePrefix, _ := src.IssuePrefix(ctx) // best-effort: "" on failure, refresh keeps the last-good value
 	return Row{
-		Root: root, Prefix: prefix(root),
+		Root: root, Prefix: prefix(root), IssuePrefix: issuePrefix,
 		BH: bh, BO: bo, BW: bw, BB: bb,
 		BCl: stats.Closed, BDf: stats.Deferred,
 		Epics: epicRows, Next: next, Claimed: claimed,

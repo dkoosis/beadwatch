@@ -267,6 +267,34 @@ func TestRefreshLastGoodOnReadFailure(t *testing.T) {
 	}
 }
 
+// TestRefreshCarriesIssuePrefix is bw-092: each row carries the repo's bead id
+// prefix as bd reports it, and a failed prefix read keeps the last-good value
+// rather than blanking it, so a reader never loses a repo's beads to one bad read.
+func TestRefreshCarriesIssuePrefix(t *testing.T) {
+	projects := t.TempDir()
+	cache := t.TempDir()
+	root := mkRepo(t, projects, "repo-a")
+	outPath := filepath.Join(cache, "counts.json")
+
+	run := func(src *fakeSource) Row {
+		t.Helper()
+		cfg := config{cacheDir: cache, projects: projects, mode: modeAll,
+			newSource: func(string) source { return src }}
+		if err := refresh(context.Background(), &cfg); err != nil {
+			t.Fatalf("refresh: %v", err)
+		}
+		return readRows(outPath)[root]
+	}
+
+	open := []bd.Issue{{ID: "ra-1", Status: bd.StatusOpen}}
+	if got := run(&fakeSource{issues: open, issuePrefix: "ra"}).IssuePrefix; got != "ra" {
+		t.Errorf("issue_prefix = %q, want %q", got, "ra")
+	}
+	if got := run(&fakeSource{issues: open, prefixErr: os.ErrPermission}).IssuePrefix; got != "ra" {
+		t.Errorf("issue_prefix after a failed read = %q, want last-good %q", got, "ra")
+	}
+}
+
 // callCountingSource returns a caller-supplied row per call index (clamped to the last
 // row once calls exceed len(rows)) — lets a test prove which of several sequential
 // refresh() invocations actually recomputed vs skipped.
@@ -290,6 +318,7 @@ func (s *callCountingSource) Stats(context.Context) (bd.Stats, error) { return b
 func (s *callCountingSource) EpicStatus(context.Context) ([]bd.EpicStatus, error) {
 	return nil, nil
 }
+func (s *callCountingSource) IssuePrefix(context.Context) (string, error) { return "", nil }
 
 // TestRefreshConvergesAfterTornRead is the st-3p8 repro: a bd write touches
 // last-touched, but the strand-counts derive that fires on that same watch-cycle reads
@@ -626,6 +655,7 @@ func (s *selfChurningSource) Stats(context.Context) (bd.Stats, error) { return b
 func (s *selfChurningSource) EpicStatus(context.Context) ([]bd.EpicStatus, error) {
 	return nil, nil
 }
+func (s *selfChurningSource) IssuePrefix(context.Context) (string, error) { return "", nil }
 
 // TestRefreshConvergesDespiteReadSelfChurn is the st-3wp.1 regression test: the whole
 // reason the refresh gate moved off bd.StoreMTime onto bd.StoreContentKey. Three

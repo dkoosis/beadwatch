@@ -141,6 +141,9 @@ func refreshLocked(ctx context.Context, cfg *config) error {
 
 		row, err := computeRow(ctx, cfg.newSource(root), root)
 		if err == nil {
+			if row.IssuePrefix == "" {
+				row.IssuePrefix = rows[root].IssuePrefix
+			}
 			rows[root] = row
 		}
 		nextState[root] = repoState{mtime: cur, pending: nextPending(cfg.mode, mtimeChanged, err)}
