@@ -38,7 +38,7 @@ func oneOpenBead() source {
 // row per repo, readable back through bdcounts.Reader (the cross-package schema
 // guard — producer and consumer agree on the wire, or this breaks).
 func TestRefreshAllComputesEveryRepo(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	a := mkRepo(t, projects, "repo-a")
 	b := mkRepo(t, projects, "repo-b")
@@ -72,7 +72,7 @@ func TestRefreshAllComputesEveryRepo(t *testing.T) {
 // it (with a log line naming the path) while a real repo's row survives and is
 // still recomputed.
 func TestRefreshDropsAbsentRepoRow(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	existing := mkRepo(t, projects, "repo-a")
 	absent := filepath.Join(t.TempDir(), "does-not-exist")
@@ -132,7 +132,7 @@ func TestRefreshDropsAbsentRepoRow(t *testing.T) {
 // the meta and the per-repo buckets back — the new top-level fields round-trip without
 // disturbing the row schema the masthead and status line already read.
 func TestRefreshStampsLivenessMeta(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	a := mkRepo(t, projects, "repo-a")
 
@@ -169,7 +169,7 @@ func TestRefreshStampsLivenessMeta(t *testing.T) {
 // (st-18l/B4). The stamp is the proof the job ran, independent of whether any bead
 // changed.
 func TestRefreshStampsMetaEvenWhenUnchanged(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	mkRepo(t, projects, "repo-a")
 
@@ -207,7 +207,7 @@ func TestRefreshStampsMetaEvenWhenUnchanged(t *testing.T) {
 // run 3, with the mtime still unchanged and pending now clear, is actually skipped). A
 // counting source proves the skip — its List is not called on the third run.
 func TestRefreshChangedSkipsUnchanged(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	mkRepo(t, projects, "repo-a") // discovery finds it; the path isn't needed here
 
@@ -241,7 +241,7 @@ func TestRefreshChangedSkipsUnchanged(t *testing.T) {
 // TestRefreshLastGoodOnReadFailure: a repo whose bd reads fail keeps its previous
 // row rather than being zeroed or dropped.
 func TestRefreshLastGoodOnReadFailure(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	root := mkRepo(t, projects, "repo-a")
 
@@ -309,7 +309,7 @@ func (s *callCountingSource) EpicStatus(context.Context) ([]bd.EpicStatus, error
 //  3. same mtime again — must NOT recompute a third time (pending cleared, mtime
 //     unchanged) — proving the retry is bounded, not a permanent hot-loop.
 func TestRefreshConvergesAfterTornRead(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	mkRepo(t, projects, "repo-a")
 
@@ -351,7 +351,7 @@ func TestRefreshConvergesAfterTornRead(t *testing.T) {
 // a successful --all visit, so a later modeChanged run doesn't force a needless extra
 // recompute.
 func TestRefreshPendingClearedOnAllMode(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	mkRepo(t, projects, "repo-a")
 
@@ -391,7 +391,7 @@ func TestRefreshPendingClearedOnAllMode(t *testing.T) {
 // mtime never changes again after the initial touch, so only the pending re-arm can
 // trigger a second attempt.
 func TestRefreshChangeTriggeredFailureReArmsPending(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	mkRepo(t, projects, "repo-a")
 
@@ -425,7 +425,7 @@ func TestRefreshChangeTriggeredFailureReArmsPending(t *testing.T) {
 // would find no prior mtime for repo-b and cold-recompute it — the ~60s thrash this fix
 // removes. The final changed run must recompute NOTHING: both repos stay settled.
 func TestRefreshExplicitPreservesOtherReposGateState(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	a := mkRepo(t, projects, "repo-a")
 	mkRepo(t, projects, "repo-b")
@@ -459,9 +459,9 @@ func TestRefreshExplicitPreservesOtherReposGateState(t *testing.T) {
 
 // TestRefreshExplicitDirs: named roots are visited directly, no discovery scan.
 func TestRefreshExplicitDirs(t *testing.T) {
-	projects := t.TempDir() // deliberately empty — explicit mode must ignore discovery
+	projects := realTempDir(t) // deliberately empty — explicit mode must ignore discovery
 	cache := t.TempDir()
-	root := mkRepo(t, t.TempDir(), "somewhere-else")
+	root := mkRepo(t, realTempDir(t), "somewhere-else")
 
 	cfg := config{cacheDir: cache, projects: projects, mode: modeExplicit,
 		targets: []string{root}, newSource: func(string) source { return oneOpenBead() }}
@@ -492,7 +492,7 @@ func mkConfigOnlyRepo(t *testing.T, projects, name string) string {
 // holds only config.yaml (no last-touched, no metadata.json — loto's shape) must
 // still be discovered, not silently skipped.
 func TestDiscoverFindsConfigOnlyRepo(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	root := mkConfigOnlyRepo(t, projects, "config-only")
 
 	got := discover(projects)
@@ -507,8 +507,8 @@ func TestDiscoverFindsConfigOnlyRepo(t *testing.T) {
 // colon-separated list of repo roots, each checked before being added so a stale
 // or mistyped entry is dropped rather than surfaced as a broken target.
 func TestDiscoverHonorsExtraRepos(t *testing.T) {
-	projects := t.TempDir()
-	extraParent := t.TempDir()
+	projects := realTempDir(t)
+	extraParent := realTempDir(t)
 	realRoot := mkRepo(t, extraParent, "chezmoi")
 	missing := filepath.Join(extraParent, "does-not-exist")
 
@@ -554,7 +554,7 @@ func setStoreState(t *testing.T, root, content string, mt time.Time) string {
 // case this same gate must NOT react to), and assert the next changed-mode run
 // recomputes it.
 func TestRefreshOutOfBandStoreChangeRefreshes(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	root := mkRepo(t, projects, "repo-a")
 	setStoreState(t, root, "root-chunk-v1", time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC))
@@ -636,7 +636,7 @@ func (s *selfChurningSource) EpicStatus(context.Context) ([]bd.EpicStatus, error
 // change and never let the repo settle (calls would be 3, not 2, and stay climbing
 // forever — the 35.7s-warm bug this bead fixes).
 func TestRefreshConvergesDespiteReadSelfChurn(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	root := mkRepo(t, projects, "repo-a")
 	manifest := setStoreState(t, root, "root-chunk", time.Now())

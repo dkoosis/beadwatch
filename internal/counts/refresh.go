@@ -113,8 +113,12 @@ func refresh(ctx context.Context, cfg *config) error {
 
 // refreshLocked is refresh's body, run with the cache-dir lock held.
 func refreshLocked(ctx context.Context, cfg *config) error {
-	targets := cfg.targets
-	if cfg.mode != modeExplicit {
+	var targets []string
+	if cfg.mode == modeExplicit {
+		for _, t := range cfg.targets {
+			targets = append(targets, canonical(t))
+		}
+	} else {
 		targets = discover(cfg.projects)
 	}
 
@@ -190,9 +194,12 @@ func nextPending(m mode, mtimeChanged bool, err error) bool {
 
 // discover returns every repo root under projects with a real .beads workspace,
 // plus any BD_COUNTS_EXTRA_REPOS entries (sd-3wp.15) — matching the shell's
-// discovery (tool-install-launchd.sh's discover_repos).
+// discovery (tool-install-launchd.sh's discover_repos). Every root is canonical
+// (bw-55b): ReadDir names are already on-disk spellings, so canonicalizing the scan
+// dir once covers the whole scan.
 func discover(projects string) []string {
 	var roots []string
+	projects = canonical(projects)
 	entries, err := os.ReadDir(projects)
 	if err == nil {
 		for _, e := range entries {
@@ -250,7 +257,7 @@ func extraRepos() []string {
 			continue
 		}
 		if isBeadsRepo(clean) {
-			out = append(out, clean)
+			out = append(out, canonical(clean))
 		}
 	}
 	return out
@@ -271,6 +278,12 @@ func readRows(path string) map[string]Row {
 	}
 	_ = json.Unmarshal(data, &rows) // malformed → empty base, rebuilt this run
 	delete(rows, bdcounts.MetaKey)  // the liveness stamp is not a repo row — re-injected on write
+	rows = canonicalKeys(rows)
+	for k := range rows {
+		row := rows[k]
+		row.Root = k // a re-keyed row skipped as unchanged must not keep its old spelling
+		rows[k] = row
+	}
 	return rows
 }
 
@@ -350,7 +363,7 @@ func readState(path string) map[string]repoState {
 		}
 		state[root] = repoState{mtime: v, pending: pendingField == "1"}
 	}
-	return state
+	return canonicalKeys(state)
 }
 
 // writeState records the visited repos' state for the next run's changed-check,
