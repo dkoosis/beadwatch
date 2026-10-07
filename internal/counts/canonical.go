@@ -39,9 +39,15 @@ func canonical(root string) string {
 }
 
 // onDiskName returns the entry of dir that part names: the exact match if one
-// exists (a case-sensitive volume may hold both Foo and foo), else the sole
-// case-insensitive match.
+// exists (a case-sensitive volume may hold both Foo and foo), else the
+// case-insensitive match. The folded match is taken only when dir/part itself
+// resolves, which is what makes the volume case-insensitive for it: on a
+// case-sensitive volume an absent foo beside a real Foo is a different path,
+// and folding would hand foo's stale row to Foo (Codex review, PR 20).
 func onDiskName(dir, part string) (string, bool) {
+	if _, err := os.Lstat(filepath.Join(dir, part)); err != nil {
+		return "", false
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", false

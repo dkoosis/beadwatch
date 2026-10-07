@@ -57,6 +57,20 @@ func TestCanonicalResolvesSymlinks(t *testing.T) {
 	}
 }
 
+// TestCanonicalKeepsWrongCaseOnCaseSensitiveVolume: where foo is absent and Foo
+// is real, foo is a different path and must not be folded onto Foo.
+func TestCanonicalKeepsWrongCaseOnCaseSensitiveVolume(t *testing.T) {
+	base := realTempDir(t)
+	mkRepo(t, base, "Foo")
+	lower := filepath.Join(base, "foo")
+	if _, err := os.Stat(lower); err == nil {
+		t.Skip("case-insensitive volume: foo is Foo here")
+	}
+	if got := canonical(lower); got != lower {
+		t.Errorf("canonical = %q, want %q unchanged", got, lower)
+	}
+}
+
 func TestCanonicalKeepsAbsentPath(t *testing.T) {
 	absent := filepath.Join(realTempDir(t), "gone", "repo")
 	if got := canonical(absent); got != absent {
