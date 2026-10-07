@@ -271,7 +271,10 @@ func TestRefreshLastGoodOnReadFailure(t *testing.T) {
 // prefix as bd reports it, and a failed prefix read keeps the last-good value
 // rather than blanking it, so a reader never loses a repo's beads to one bad read.
 func TestRefreshCarriesIssuePrefix(t *testing.T) {
-	projects := t.TempDir()
+	projects, err := filepath.EvalSymlinks(t.TempDir()) // the key beadwatch writes is resolved (bw-55b)
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
 	cache := t.TempDir()
 	root := mkRepo(t, projects, "repo-a")
 	outPath := filepath.Join(cache, "counts.json")
