@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -202,15 +203,34 @@ func (c *Client) List(ctx context.Context, opts ListOpts) ([]Issue, error) {
 }
 
 // IssuePrefix returns the repo's bead id prefix (`ccp` in `ccp-4msy`) as bd
-// stores it, from `bd config get issue_prefix`. bd keeps it in its store, not
-// in config.yaml, so this is the one place a reader can learn it.
+// stores it, from `bd config get issue_prefix --json`. bd keeps it in its
+// store, not in config.yaml, so this is the one place a reader can learn it.
+// The JSON `value` is decoded rather than the text read: the text form prints
+// `issue_prefix (not set)` with exit 0 when unset, and BD_JSON would turn the
+// text into an object (Codex review, PR 21). An unset or malformed value is an
+// error, so the caller keeps its last-good prefix.
 func (c *Client) IssuePrefix(ctx context.Context) (string, error) {
-	out, err := c.run(ctx, "config", "get", "issue_prefix")
+	out, err := c.run(ctx, "config", "get", "issue_prefix", "--json")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	var resp struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return "", fmt.Errorf("bd config get issue_prefix: decode: %w", err)
+	}
+	if !issuePrefixRe.MatchString(resp.Value) {
+		return "", fmt.Errorf("bd config get issue_prefix: %w: %q", ErrNoIssuePrefix, resp.Value)
+	}
+	return resp.Value, nil
 }
+
+// ErrNoIssuePrefix means bd reports no usable issue prefix for the repo.
+var ErrNoIssuePrefix = errors.New("no usable issue prefix")
+
+// issuePrefixRe is a bead id prefix's shape: what precedes the first `-<hash>`.
+var issuePrefixRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // Stats mirrors the summary block of `bd stats --json`: the per-status issue
 // counts. Fields bd omits stay zero; extra summary fields bd reports are

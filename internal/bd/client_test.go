@@ -285,3 +285,30 @@ func TestDecodeIssueAbsentPriorityIsIndistinguishable(t *testing.T) {
 		t.Fatalf("absent = %d, want nil — the int collapse must be closed", *absent[0].Priority)
 	}
 }
+
+// TestIssuePrefixDecodesJSONValue is the PR 21 review fix: IssuePrefix reads the
+// JSON value, never the text form, and an unset or text value is an error so the
+// caller keeps its last-good prefix instead of publishing "issue_prefix (not set)".
+func TestIssuePrefixDecodesJSONValue(t *testing.T) {
+	cases := []struct {
+		name, out string
+		want      string
+		wantErr   bool
+	}{
+		{"set", `echo '{"key":"issue_prefix","schema_version":1,"value":"bw"}'`, "bw", false},
+		{"unset", `echo '{"key":"issue_prefix","schema_version":1,"value":""}'`, "", true},
+		{"text form", `echo 'issue_prefix (not set)'`, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, log := fakeBD(t, tc.out)
+			got, err := c.IssuePrefix(context.Background())
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Errorf("IssuePrefix = %q, %v; want %q, err=%v", got, err, tc.want, tc.wantErr)
+			}
+			if args := readLog(t, log)[0]; args != "config get issue_prefix --json" {
+				t.Errorf("args = %q, want %q", args, "config get issue_prefix --json")
+			}
+		})
+	}
+}
