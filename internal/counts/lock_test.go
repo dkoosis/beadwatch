@@ -37,7 +37,7 @@ func (g *gatedSource) List(ctx context.Context, opts bd.ListOpts) ([]bd.Issue, e
 // the cache-dir lock, the second run read the base while the first was still computing
 // and then replaced the file, silently dropping the first run's repo.
 func TestRefreshSerializesConcurrentRuns(t *testing.T) {
-	projects := t.TempDir()
+	projects := realTempDir(t)
 	cache := t.TempDir()
 	a := mkRepo(t, projects, "repo-a")
 	b := mkRepo(t, projects, "repo-b")
