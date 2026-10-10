@@ -9,6 +9,10 @@
 //	beadwatch              # every changed repo (skip mtime-unchanged)
 //	beadwatch --all        # every discovered repo, unconditionally
 //	beadwatch <dir>...      # only the named repo roots
+//	beadwatch row <dir>     # print dir's counts.json row (read-only; bw-ryi)
+//
+// The leading `row` verb is matched before any flag or dir: targets are absolute
+// repo roots, so a dir literally named row is a non-case.
 //
 // Env: BD_COUNTS_CACHE_DIR, BD_COUNTS_PROJECTS_DIR (read inside internal/counts).
 package main
@@ -25,6 +29,12 @@ import (
 var Version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "row" {
+		if err := counts.RunRow(os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("beadwatch: %v", err)
+		}
+		return
+	}
 	if err := counts.Run(os.Args[1:], Version); err != nil {
 		log.Fatalf("beadwatch: %v", err)
 	}
