@@ -169,6 +169,8 @@ func TestHumanGate(t *testing.T) {
 	}{
 		{"plain", Issue{ID: "a"}, false, false},
 		{"label human", Issue{Labels: []string{"core", "human"}}, true, false},
+		{"label needs-dk", Issue{Labels: []string{"core", "needs-dk"}}, true, false},
+		{"needs-dk with review_needed is a decision", Issue{Labels: []string{"needs-dk"}, Metadata: map[string]any{"review_needed": "true"}}, true, false},
 		{"review string true", Issue{Metadata: map[string]any{"review_needed": "true"}}, false, true},
 		{"review bool true", Issue{Metadata: map[string]any{"review_needed": true}}, false, true},
 		{"review false", Issue{Metadata: map[string]any{"review_needed": "false"}}, false, false},
@@ -279,4 +281,29 @@ func TestLanesRecognizesBdGate(t *testing.T) {
 			t.Errorf("lanes[bead] = %v, want LaneWaiting", lanes["bead"])
 		}
 	})
+}
+
+// TestLanesNeedsDKLabel pins bw-bje: a bead labeled needs-dk (the label sdlc
+// files a question for dk under) is a DECISION like human — LaneWaiting
+// whatever its status or blocker, and review_needed does not demote it.
+func TestLanesNeedsDKLabel(t *testing.T) {
+	issues := []Issue{
+		{ID: "q", Status: StatusOpen, Labels: []string{"needs-dk"}},
+		{ID: "q-ip", Status: StatusInProgress, Labels: []string{"needs-dk"}},
+		{ID: "q-blocked", Status: StatusOpen, Labels: []string{"needs-dk"}},
+		{ID: "q-review", Status: StatusOpen, Labels: []string{"needs-dk"}, Metadata: map[string]any{"review_needed": "true"}},
+		{ID: "q-closed", Status: StatusClosed, Labels: []string{"needs-dk"}},
+		{ID: "blocker", Status: StatusOpen},
+	}
+	deps := []DepEdge{{IssueID: "q-blocked", DependsOnID: "blocker", Type: DepBlocks}}
+	got := Lanes(issues, deps)
+	want := map[string]Lane{
+		"q":         LaneWaiting,
+		"q-ip":      LaneWaiting,
+		"q-blocked": LaneWaiting,
+		"q-review":  LaneWaiting,
+		"blocker":   LaneOpen,
+		// q-closed → LaneNone, omitted
+	}
+	assertLanes(t, got, want, issues)
 }
