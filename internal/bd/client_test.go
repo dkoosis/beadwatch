@@ -39,14 +39,15 @@ func readLog(t *testing.T, path string) []string {
 }
 
 // TestListPassesLimitZero pins List's own flag vocabulary: it always lifts
-// bd's default row cap.
+// bd's default row cap and asks for gate issues (bd hides them by default, and
+// bw-avk's gate routing reads them from the list, bw-xlk).
 func TestListPassesLimitZero(t *testing.T) {
 	c, log := fakeBD(t, `echo '[]'`)
 	if _, err := c.List(context.Background(), ListOpts{}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	got := readLog(t, log)
-	want := "list --json --limit 0"
+	want := "list --json --limit 0 --include-gates"
 	if got[0] != want {
 		t.Errorf("args = %q, want %q", got[0], want)
 	}

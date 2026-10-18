@@ -204,17 +204,13 @@ func TestComputeRowRecognizesBdGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("computeRow: %v", err)
 		}
-		// bo=1 is the gate issue itself, and that is a DEFECT this test pins
-		// rather than blesses (bw-xlk): nothing anywhere filters
-		// issue_type=="gate" as a work item, so a synthetic wait condition
-		// nobody can claim counts as ready work — and pickNext can name it
-		// Next. Pre-existing, not introduced here; this change only made it
-		// visible by giving gates a reason to exist. When bw-xlk lands, this
-		// expectation becomes bo=0 and that is the fix, not a regression.
-		// What this line does assert today: the bead under test must NOT also
-		// land in bo — the gate routes it to bh, which is bw-avk's whole point.
-		if row.BH != 1 || row.BO != 1 {
-			t.Errorf("bh=%d bo=%d, want bh=1 bo=1 — the gated bead must count as waiting, not open", row.BH, row.BO)
+		// The gate issue is a wait condition, not work (bw-xlk): bo counts
+		// nothing here, and the bead it blocks lands in bh (bw-avk).
+		if row.BH != 1 || row.BO != 0 || row.BW != 0 || row.BB != 0 {
+			t.Errorf("bh=%d bo=%d bw=%d bb=%d, want bh=1 and the rest 0 — the gate is not work and the gated bead counts as waiting", row.BH, row.BO, row.BW, row.BB)
+		}
+		if row.Next == nil || row.Next.ID != "bead" {
+			t.Errorf("next = %+v, want the gated bead (waiting-on-dk), never the gate", row.Next)
 		}
 	})
 	t.Run("gate closed -> blocks nothing, waiting=0", func(t *testing.T) {
@@ -230,7 +226,7 @@ func TestComputeRowRecognizesBdGate(t *testing.T) {
 			t.Fatalf("computeRow: %v", err)
 		}
 		if row.BH != 0 || row.BO != 1 {
-			t.Errorf("bh=%d bo=%d, want bh=0 bo=1 — a closed gate blocks nothing", row.BH, row.BO)
+			t.Errorf("bh=%d bo=%d, want bh=0 bo=1 — a closed gate blocks nothing and is not counted", row.BH, row.BO)
 		}
 	})
 	t.Run("human label alone, no gate -> waiting=1", func(t *testing.T) {
@@ -245,6 +241,57 @@ func TestComputeRowRecognizesBdGate(t *testing.T) {
 		}
 		if row.BH != 1 {
 			t.Errorf("bh=%d, want 1 — the label leg stays live with no behavior change", row.BH)
+		}
+	})
+}
+
+// TestComputeRowExcludesGateIssues pins bw-xlk: a bd gate issue of any await
+// type (human, timer, gh:run, gh:pr, bead) is a wait condition, not work. No
+// bucket counts it, no pickNext rung names it (an in_progress or epic-child
+// gate included), and the bead it blocks keeps its bw-avk routing: ◆ behind a
+// human gate, ● behind any other await type.
+func TestComputeRowExcludesGateIssues(t *testing.T) {
+	for _, await := range []string{"human", "timer", "gh:run", "gh:pr", "bead"} {
+		t.Run("open "+await+" gate counts nothing", func(t *testing.T) {
+			src := &fakeSource{
+				issues: []bd.Issue{
+					{ID: "bead", Status: bd.StatusOpen, Priority: new(3)},
+					{ID: "gate", Status: bd.StatusOpen, IssueType: "gate", AwaitType: await, Priority: new(0)},
+				},
+				deps: []bd.DepEdge{{IssueID: "bead", DependsOnID: "gate", Type: bd.DepBlocks}},
+			}
+			row, err := computeRow(context.Background(), src, "/tmp/not-a-repo-xyz")
+			if err != nil {
+				t.Fatalf("computeRow: %v", err)
+			}
+			wantBH, wantBB := 0, 1
+			if await == "human" {
+				wantBH, wantBB = 1, 0
+			}
+			if row.BH != wantBH || row.BO != 0 || row.BW != 0 || row.BB != wantBB {
+				t.Errorf("bh=%d bo=%d bw=%d bb=%d, want bh=%d bo=0 bw=0 bb=%d — the gate itself is not counted", row.BH, row.BO, row.BW, row.BB, wantBH, wantBB)
+			}
+			if row.Next != nil && row.Next.ID == "gate" {
+				t.Errorf("next = %+v, must never be the gate issue", row.Next)
+			}
+		})
+	}
+	t.Run("an in_progress gate is neither claimed nor next, and an open one is not waiting-on-dk", func(t *testing.T) {
+		src := &fakeSource{
+			issues: []bd.Issue{
+				{ID: "gate", Status: bd.StatusInProgress, IssueType: "gate", AwaitType: "timer", Priority: new(0)},
+				{ID: "gate2", Status: bd.StatusOpen, IssueType: "gate", AwaitType: "human", Priority: new(0)},
+			},
+		}
+		row, err := computeRow(context.Background(), src, "/tmp/not-a-repo-xyz")
+		if err != nil {
+			t.Fatalf("computeRow: %v", err)
+		}
+		if row.BH+row.BO+row.BW+row.BB != 0 {
+			t.Errorf("bh=%d bo=%d bw=%d bb=%d, want all 0 — gates are not work", row.BH, row.BO, row.BW, row.BB)
+		}
+		if row.Next != nil || row.Claimed != nil {
+			t.Errorf("next=%+v claimed=%+v, want both nil", row.Next, row.Claimed)
 		}
 	})
 }
