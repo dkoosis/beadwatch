@@ -20,6 +20,11 @@ import "slices"
 // bdx's DECISION queue convention (the human-gate model).
 const humanLabel = "human"
 
+// needsDKLabel is the bd label sdlc puts on a child bead that files a question
+// waiting on dk (sdlc SPEC R6, R11). It is a DECISION exactly like humanLabel
+// (bw-bje); human stays until no writer emits it.
+const needsDKLabel = "needs-dk"
+
 // reviewNeededKey is the bd metadata key marking a bead as awaiting human
 // review — bdx's REVIEW queue. bd emits it as the string "true"; bool is
 // tolerated defensively.
@@ -63,7 +68,7 @@ func humanGateBlocked(deps []DepEdge, idx map[string]Issue) map[string]bool {
 
 // humanGate classifies a bead's human-gate state from its full issue record
 // and whether an open bd human gate blocks it (humanGateBlocked, bw-avk): a
-// DECISION (the "human" label, or an open human gate) or a REVIEW
+// DECISION (the "human" or "needs-dk" label, or an open human gate) or a REVIEW
 // (review_needed=="true"). A bead carrying both a decision signal and a
 // review signal is a decision — the stronger "needs a human call" signal. A
 // bead with neither is neither (claimable).
@@ -74,7 +79,7 @@ func humanGate(iss *Issue, gated bool) (decision, review bool) {
 	if iss == nil {
 		return false, false
 	}
-	if slices.Contains(iss.Labels, humanLabel) {
+	if slices.Contains(iss.Labels, humanLabel) || slices.Contains(iss.Labels, needsDKLabel) {
 		return true, false
 	}
 	if reviewNeeded(iss.Metadata) {

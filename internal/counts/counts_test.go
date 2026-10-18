@@ -27,6 +27,21 @@ func writeRoadmapDir(t *testing.T, body string) string {
 // errEpicStatusBoom is a static sentinel for the EpicStatus-failure fixture (err113).
 var errEpicStatusBoom = errors.New("bd epic status: boom")
 
+// TestLaneCountsNeedsDK pins bw-bje: a needs-dk labeled bead lands in bh (the
+// statusline's ◆), not in bo/bw/bb, and review_needed does not demote it.
+func TestLaneCountsNeedsDK(t *testing.T) {
+	issues := []bd.Issue{
+		{ID: "open-plain", Status: bd.StatusOpen},                                                                                       // ○
+		{ID: "open-needs-dk", Status: bd.StatusOpen, Labels: []string{"needs-dk"}},                                                      // ◆
+		{ID: "ip-needs-dk", Status: bd.StatusInProgress, Labels: []string{"needs-dk"}},                                                  // ◆ — not also ◐
+		{ID: "needs-dk-review", Status: bd.StatusOpen, Labels: []string{"needs-dk"}, Metadata: map[string]any{"review_needed": "true"}}, // ◆ decision
+	}
+	bh, bo, bw, bb := laneCounts(insight.Lanes(issues, nil))
+	if bh != 3 || bo != 1 || bw != 0 || bb != 0 {
+		t.Errorf("laneCounts = bh %d bo %d bw %d bb %d, want 3 1 0 0", bh, bo, bw, bb)
+	}
+}
+
 // TestLaneCountsMatchesInsightPartition is the 5-vs-7 repro: the shell's
 // `ready ∧ label=human` missed two ◆ beads — a review_needed open bead and a
 // human-labelled in-progress bead. laneCounts routes both to bh via insight.Lanes,
