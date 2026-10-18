@@ -188,10 +188,12 @@ type ListOpts struct {
 
 // List returns the repo's issues. It is the one place that knows bd's
 // list-flag vocabulary: it always lifts bd's default row cap (--limit 0, since
-// the derivation folds the whole set) and adds --status only when
-// opts.Status is set. Callers speak intent through ListOpts, never CLI flags.
+// the derivation folds the whole set), always asks for gate issues
+// (--include-gates; bd hides them by default, and without them a bead a human
+// gate blocks cannot be routed to ◆ waiting, bw-avk) and adds --status only
+// when opts.Status is set. Callers speak intent through ListOpts, never CLI flags.
 func (c *Client) List(ctx context.Context, opts ListOpts) ([]Issue, error) {
-	args := []string{"list", "--json", "--limit", "0"}
+	args := []string{"list", "--json", "--limit", "0", "--include-gates"}
 	if opts.Status != "" {
 		args = append(args, "--status", string(opts.Status))
 	}
