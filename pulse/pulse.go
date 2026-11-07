@@ -37,6 +37,14 @@ const issueTypeGate = "gate"
 // (bw-avk).
 const gateAwaitHuman = "human"
 
+// isGateIssue reports whether iss is a bd gate issue of any await type — a
+// synthetic wait condition (bd gate create), never work a person claims. Lanes
+// keeps it in the issue index, so it still blocks the bead it gates, but gives
+// it no lane of its own (bw-xlk).
+func isGateIssue(iss *Issue) bool {
+	return iss.IssueType == issueTypeGate
+}
+
 // isHumanGateIssue reports whether iss is an unresolved bd human gate: a
 // "gate" issue awaiting "human", still open. A closed gate has already been
 // resolved (bd gate resolve, or a manual close) and blocks nothing.
@@ -165,7 +173,9 @@ func LaneOf(status Status, gated, hasBlocker bool) Lane {
 // omitted, so a missing key reads back as LaneNone (its zero value). Exactly
 // one lane per included issue, so a count of a lane and a list of that lane's
 // members agree by construction, and bh+bo+bw+bb sums to the count of beads
-// whose status is open, in_progress or blocked.
+// whose status is open, in_progress or blocked, gate issues aside: a bd gate
+// issue (isGateIssue) is not work, so it has no lane whatever its status, while
+// the bead it blocks still reads it from the index (bw-avk, bw-xlk).
 func Lanes(issues []Issue, deps []DepEdge) map[string]Lane {
 	idx := indexIssues(issues)
 	openBlockers := blockerCounts(deps, idx)
@@ -173,6 +183,9 @@ func Lanes(issues []Issue, deps []DepEdge) map[string]Lane {
 	lanes := make(map[string]Lane, len(issues))
 	for i := range issues {
 		iss := &issues[i]
+		if isGateIssue(iss) {
+			continue
+		}
 		if l := LaneOf(iss.Status, isHumanGated(iss, gateBlocked[iss.ID]), openBlockers[iss.ID] > 0); l != LaneNone {
 			lanes[iss.ID] = l
 		}

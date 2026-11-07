@@ -81,6 +81,18 @@ type RoadmapPos struct {
 // epic never IS the next bead to work).
 const issueTypeEpic = "epic"
 
+// issueTypeGate is bd's issue_type value for a gate issue (bd gate create) — an
+// async wait condition, not work. Lanes gives it no lane, so no bucket counts
+// it; pickNext's in_progress rung reads status rather than a lane, so it
+// excludes gates itself (bw-xlk).
+const issueTypeGate = "gate"
+
+// isWork reports whether iss can be counted or named as work: neither an epic
+// (a container) nor a gate issue (a wait condition).
+func isWork(iss *bd.Issue) bool {
+	return iss.IssueType != issueTypeEpic && iss.IssueType != issueTypeGate
+}
+
 // EpicRow is one live roadmap epic's ◆○◐● partition over its DIRECT children
 // (Issue.Parent == the epic's id), excluding nested epics (issue_type=="epic").
 // Human wins every overlap (decision 477486825755): a gated in-progress child
@@ -293,7 +305,7 @@ func epicBuckets(liveEpics []string, meta map[string]bd.EpicStatus, issues []bd.
 	}
 	for i := range issues {
 		iss := &issues[i]
-		if iss.IssueType == issueTypeEpic {
+		if !isWork(iss) {
 			continue
 		}
 		ri, ok := idx[iss.Parent]
@@ -315,9 +327,9 @@ func epicBuckets(liveEpics []string, meta map[string]bd.EpicStatus, issues []bd.
 	return rows
 }
 
-// pickNext runs the four-rung what's-next cascade, epics excluded from every rung
-// (an epic never IS the next bead to work). Each rung is tried in order; the first
-// non-empty candidate set wins via pickTop (lowest priority number, nil priority
+// pickNext runs the four-rung what's-next cascade, epics and gate issues excluded
+// from every rung (neither IS the next bead to work). Each rung is tried in order;
+// the first non-empty candidate set wins via pickTop (lowest priority number, nil priority
 // ranking as P2 to match strand.NewBead's default, ties broken by the
 // lexicographically smallest id):
 //
@@ -341,21 +353,21 @@ func epicBuckets(liveEpics []string, meta map[string]bd.EpicStatus, issues []bd.
 // every liveEpics[1:] epic is never picked, at any rung.
 func pickNext(issues []bd.Issue, lanes map[string]insight.Lane, currentEpic string, liveEpics []string) (next *Next, claimed *Ref) {
 	if top, ok := pickTop(filterIssues(issues, func(iss *bd.Issue) bool {
-		return iss.IssueType != issueTypeEpic && iss.Status == bd.StatusInProgress
+		return isWork(iss) && iss.Status == bd.StatusInProgress
 	})); ok {
 		return &Next{ID: top.ID, Title: top.Title, Reason: "claimed"}, &Ref{ID: top.ID, Title: top.Title}
 	}
 
 	if currentEpic != "" {
 		if top, ok := pickTop(filterIssues(issues, func(iss *bd.Issue) bool {
-			return iss.IssueType != issueTypeEpic && iss.Parent == currentEpic && lanes[iss.ID] == insight.LaneOpen
+			return isWork(iss) && iss.Parent == currentEpic && lanes[iss.ID] == insight.LaneOpen
 		})); ok {
 			return &Next{ID: top.ID, Title: top.Title, Reason: "epic"}, nil
 		}
 	}
 
 	if top, ok := pickTop(filterIssues(issues, func(iss *bd.Issue) bool {
-		return iss.IssueType != issueTypeEpic && lanes[iss.ID] == insight.LaneWaiting
+		return isWork(iss) && lanes[iss.ID] == insight.LaneWaiting
 	})); ok {
 		return &Next{ID: top.ID, Title: top.Title, Reason: "waiting-on-dk"}, nil
 	}
@@ -363,7 +375,7 @@ func pickNext(issues []bd.Issue, lanes map[string]insight.Lane, currentEpic stri
 	if len(liveEpics) > 1 {
 		for _, epicID := range liveEpics[1:] {
 			if top, ok := pickTop(filterIssues(issues, func(iss *bd.Issue) bool {
-				return iss.IssueType != issueTypeEpic && iss.Parent == epicID && lanes[iss.ID] == insight.LaneOpen
+				return isWork(iss) && iss.Parent == epicID && lanes[iss.ID] == insight.LaneOpen
 			})); ok {
 				return &Next{ID: top.ID, Title: top.Title, Reason: "next-epic"}, nil
 			}

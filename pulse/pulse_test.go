@@ -270,6 +270,30 @@ func TestLanesRecognizesBdGate(t *testing.T) {
 			t.Errorf("lanes[bead] = %v, want LaneOpen", lanes["bead"])
 		}
 	})
+	t.Run("a gate issue has no lane of its own, whatever its await type or status", func(t *testing.T) {
+		issues := []Issue{
+			{ID: "bead", Status: StatusOpen},
+			{ID: "g-human", Status: StatusOpen, IssueType: "gate", AwaitType: "human"},
+			{ID: "g-timer", Status: StatusOpen, IssueType: "gate", AwaitType: "timer"},
+			{ID: "g-run", Status: StatusInProgress, IssueType: "gate", AwaitType: "gh:run"},
+			{ID: "g-blocked", Status: StatusBlocked, IssueType: "gate", AwaitType: "gh:pr"},
+		}
+		deps := []DepEdge{
+			{IssueID: "bead", DependsOnID: "g-human", Type: DepBlocks},
+			{IssueID: "g-blocked", DependsOnID: "g-timer", Type: DepBlocks},
+		}
+		lanes := Lanes(issues, deps)
+		want := map[string]Lane{"bead": LaneWaiting}
+		assertLanes(t, lanes, want, issues)
+	})
+	t.Run("a timer gate blocks its bead without routing it to waiting", func(t *testing.T) {
+		issues := []Issue{
+			{ID: "bead", Status: StatusOpen},
+			{ID: "gate", Status: StatusOpen, IssueType: "gate", AwaitType: "timer"},
+		}
+		deps := []DepEdge{{IssueID: "bead", DependsOnID: "gate", Type: DepBlocks}}
+		assertLanes(t, Lanes(issues, deps), map[string]Lane{"bead": LaneBlocked}, issues)
+	})
 	t.Run("human label alone still routes to waiting", func(t *testing.T) {
 		issues := []Issue{
 			{ID: "bead", Status: StatusOpen, Labels: []string{"human"}},
