@@ -280,7 +280,10 @@ func readRows(path string) map[string]Row {
 		return rows
 	}
 	if err := json.Unmarshal(data, &rows); err != nil {
-		rows = map[string]Row{} // malformed → empty base, rebuilt this run
+		if syntax, ok := errors.AsType[*json.SyntaxError](err); ok && syntax != nil {
+			rows = map[string]Row{} // malformed → empty base, rebuilt this run
+		}
+		// A mistyped field leaves the other rows decoded: keep them as the last-good base.
 	}
 	delete(rows, bdcounts.MetaKey) // the liveness stamp is not a repo row — re-injected on write
 	rows = canonicalKeys(rows)

@@ -53,7 +53,7 @@ func TestRefreshAllComputesEveryRepo(t *testing.T) {
 		t.Fatalf("refresh: %v", err)
 	}
 
-	r := bdcounts.NewReaderAt(filepath.Join(cache, "counts.json"))
+	r := newWireReader(filepath.Join(cache, "counts.json"))
 	for _, root := range []string{a, b} {
 		bk, ok := r.Lookup(root)
 		if !ok {
@@ -114,7 +114,7 @@ func TestRefreshDropsAbsentRepoRow(t *testing.T) {
 		t.Errorf("stderr = %q, want one log line naming the dropped path %q", logged.String(), absent)
 	}
 
-	r := bdcounts.NewReaderAt(outPath)
+	r := newWireReader(outPath)
 	if _, ok := r.Lookup(absent); ok {
 		t.Errorf("row for absent path %s still present after refresh, want dropped", absent)
 	}
@@ -149,7 +149,7 @@ func TestRefreshStampsLivenessMeta(t *testing.T) {
 		t.Fatalf("refresh: %v", err)
 	}
 
-	r := bdcounts.NewReaderAt(filepath.Join(cache, "counts.json"))
+	r := newWireReader(filepath.Join(cache, "counts.json"))
 	// The row still decodes (schema intact alongside the new meta key).
 	if bk, ok := r.Lookup(a); !ok || bk.Open != 1 {
 		t.Fatalf("Lookup(%s) = %+v ok=%v, want Open 1 — meta stamp perturbed the row schema", a, bk, ok)
@@ -194,7 +194,7 @@ func TestRefreshStampsMetaEvenWhenUnchanged(t *testing.T) {
 	if err := refresh(context.Background(), &cfg); err != nil {
 		t.Fatalf("refresh (quiet): %v", err)
 	}
-	m, ok := bdcounts.NewReaderAt(filepath.Join(cache, "counts.json")).Meta()
+	m, ok := newWireReader(filepath.Join(cache, "counts.json")).Meta()
 	if !ok || m.LastRun != t2.Unix() {
 		t.Errorf("Meta after a no-change run = %+v ok=%v, want LastRun %d — a quiet run must still prove liveness", m, ok, t2.Unix())
 	}
@@ -258,7 +258,7 @@ func TestRefreshLastGoodOnReadFailure(t *testing.T) {
 		t.Fatalf("broken refresh: %v", err)
 	}
 
-	bk, ok := bdcounts.NewReaderAt(filepath.Join(cache, "counts.json")).Lookup(root)
+	bk, ok := newWireReader(filepath.Join(cache, "counts.json")).Lookup(root)
 	if !ok {
 		t.Fatal("row dropped on read failure — last-good not preserved")
 	}
@@ -500,7 +500,7 @@ func TestRefreshExplicitDirs(t *testing.T) {
 	if err := refresh(context.Background(), &cfg); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
-	if _, ok := bdcounts.NewReaderAt(filepath.Join(cache, "counts.json")).Lookup(root); !ok {
+	if _, ok := newWireReader(filepath.Join(cache, "counts.json")).Lookup(root); !ok {
 		t.Errorf("explicit dir %s not in output", root)
 	}
 }

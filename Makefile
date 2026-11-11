@@ -6,9 +6,6 @@ include .sandbox/lib/Makefile.cross.mk
 
 .PHONY: help check audit deploy build install lint race fuzz dupe nilcheck deadcode omitempty standard test vet vuln clean
 
-SHELL := /bin/bash
-.SHELLFLAGS := -euo pipefail -c
-
 # Tool pins. The checker and the audit tools run at these pins through go run
 # or npx, so no one installs them by hand. golangci-lint's pin is in
 # .sandbox/project.conf.
