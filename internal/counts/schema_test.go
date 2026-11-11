@@ -131,7 +131,7 @@ func TestWireMetaCoexists(t *testing.T) {
 }
 
 // TestReadRowsKeepsRowsOnMistypedField: one skewed row (a string where a number
-// belongs) must not drop the other repos' last-good rows; only malformed JSON
+// belongs) is dropped alone, to be recomputed, and the other repos' last-good rows stay; only malformed JSON
 // starts an empty base.
 func TestReadRowsKeepsRowsOnMistypedField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "counts.json")
@@ -139,8 +139,12 @@ func TestReadRowsKeepsRowsOnMistypedField(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if rows := readRows(path); rows["/r/good"].BO != 3 {
+	rows := readRows(path)
+	if rows["/r/good"].BO != 3 {
 		t.Errorf("a mistyped field in /r/bad dropped /r/good: %+v", rows)
+	}
+	if _, ok := rows["/r/bad"]; ok {
+		t.Errorf("mistyped row /r/bad kept with a zeroed field: %+v", rows["/r/bad"])
 	}
 	if err := os.WriteFile(path, []byte(`{not json`), 0o600); err != nil {
 		t.Fatal(err)

@@ -272,18 +272,24 @@ func hasFile(parts ...string) bool {
 }
 
 // readRows loads the existing counts.json as the last-good base; a missing or
-// malformed file starts an empty set (the next write rebuilds it).
+// malformed file starts an empty set (the next write rebuilds it), and a row
+// that does not decode is dropped alone so it is recomputed.
 func readRows(path string) map[string]Row {
 	rows := map[string]Row{}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return rows
 	}
-	if err := json.Unmarshal(data, &rows); err != nil {
-		if syntax, ok := errors.AsType[*json.SyntaxError](err); ok && syntax != nil {
-			rows = map[string]Row{} // malformed → empty base, rebuilt this run
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return rows // malformed → empty base, rebuilt this run
+	}
+	for k, v := range raw {
+		var row Row
+		if err := json.Unmarshal(v, &row); err != nil {
+			continue // a mistyped row is dropped and recomputed; the other rows stay last-good
 		}
-		// A mistyped field leaves the other rows decoded: keep them as the last-good base.
+		rows[k] = row
 	}
 	delete(rows, bdcounts.MetaKey) // the liveness stamp is not a repo row — re-injected on write
 	rows = canonicalKeys(rows)
