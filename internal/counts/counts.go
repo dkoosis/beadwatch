@@ -188,7 +188,7 @@ func computeRow(ctx context.Context, src source, root string) (Row, error) {
 		// still resolves from those; a transient blank heals next cycle.
 		next, claimed = pickNext(issues, lanes, "", nil)
 	}
-	issuePrefix, _ := src.IssuePrefix(ctx) // best-effort: "" on failure, refresh keeps the last-good value
+	issuePrefix, _ := src.IssuePrefix(ctx) //nolint:errcheck // best-effort: "" on failure, refresh keeps the last-good value
 	return Row{
 		Root: root, Prefix: prefix(root), IssuePrefix: issuePrefix,
 		BH: bh, BO: bo, BW: bw, BB: bb,

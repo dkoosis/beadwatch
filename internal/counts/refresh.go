@@ -279,8 +279,10 @@ func readRows(path string) map[string]Row {
 	if err != nil {
 		return rows
 	}
-	_ = json.Unmarshal(data, &rows) // malformed → empty base, rebuilt this run
-	delete(rows, bdcounts.MetaKey)  // the liveness stamp is not a repo row — re-injected on write
+	if err := json.Unmarshal(data, &rows); err != nil {
+		rows = map[string]Row{} // malformed → empty base, rebuilt this run
+	}
+	delete(rows, bdcounts.MetaKey) // the liveness stamp is not a repo row — re-injected on write
 	rows = canonicalKeys(rows)
 	for k := range rows {
 		row := rows[k]
@@ -402,7 +404,7 @@ func cacheDir() string {
 	if dir := os.Getenv("BD_COUNTS_CACHE_DIR"); dir != "" {
 		return dir
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := os.UserHomeDir() //nolint:errcheck // no home: the path falls back to a cwd-relative one, as before
 	return filepath.Join(home, ".cache", "cc-dashboard")
 }
 
@@ -412,6 +414,6 @@ func projectsDir() string {
 	if dir := os.Getenv("BD_COUNTS_PROJECTS_DIR"); dir != "" {
 		return dir
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := os.UserHomeDir() //nolint:errcheck // no home: the path falls back to a cwd-relative one, as before
 	return filepath.Join(home, "Projects")
 }

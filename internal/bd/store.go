@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+// manifestPaths lists the repo's Dolt manifest files. A glob error (a repoPath
+// holding a malformed pattern character) means no usable match: the callers'
+// degrade-to-caller-behavior signal, same as an empty result.
+func manifestPaths(repoPath string) []string {
+	matches, err := filepath.Glob(filepath.Join(repoPath, ".beads", "embeddeddolt", "*", ".dolt", "noms", "manifest"))
+	if err != nil {
+		return nil
+	}
+	return matches
+}
+
 // StoreMTime reports the newest mtime of the repo's Dolt noms manifest, the
 // file Dolt rewrites on every commit — an out-of-band change signal. The glob
 // covers the (single) embedded database under the workspace without the
@@ -23,7 +34,7 @@ import (
 // — a second re-implementation of the glob is exactly the drift a shared home
 // exists to kill.
 func StoreMTime(repoPath string) (time.Time, bool) {
-	matches, _ := filepath.Glob(filepath.Join(repoPath, ".beads", "embeddeddolt", "*", ".dolt", "noms", "manifest"))
+	matches := manifestPaths(repoPath)
 	var newest time.Time
 	found := false
 	for _, m := range matches {
@@ -57,7 +68,7 @@ func StoreMTime(repoPath string) (time.Time, bool) {
 // every read fails, the same degrade-to-caller-behavior signal StoreMTime
 // returns.
 func StoreContentKey(repoPath string) (int64, bool) {
-	matches, _ := filepath.Glob(filepath.Join(repoPath, ".beads", "embeddeddolt", "*", ".dolt", "noms", "manifest"))
+	matches := manifestPaths(repoPath)
 	sort.Strings(matches)
 	h := fnv.New64a()
 	found := false
