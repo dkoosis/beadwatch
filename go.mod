@@ -1,8 +1,6 @@
 module github.com/dkoosis/beadwatch
 
-go 1.26.4
-
-toolchain go1.26.5
+go 1.26.11
 
 require (
 	github.com/dkoosis/atomicfile v0.0.0-20260811102456-9091c28d4820
