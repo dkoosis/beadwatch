@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/dkoosis/beadwatch/internal/bd"
-	"github.com/dkoosis/beadwatch/internal/bdcounts"
 )
 
 // gatedSource is a source whose first read parks until released, so a test can hold
@@ -81,7 +80,7 @@ func TestRefreshSerializesConcurrentRuns(t *testing.T) {
 		}
 	}
 
-	r := bdcounts.NewReaderAt(filepath.Join(cache, "counts.json"))
+	r := newWireReader(filepath.Join(cache, "counts.json"))
 	for _, root := range []string{a, b} {
 		if _, ok := r.Lookup(root); !ok {
 			t.Errorf("no counts.json row for %s — a concurrent refresh dropped it", root)

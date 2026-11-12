@@ -10,10 +10,6 @@ require (
 )
 
 require (
-	github.com/dkoosis/conform-to-sdlc v0.3.5 // indirect
 	github.com/google/renameio/v2 v2.0.2 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-tool github.com/dkoosis/conform-to-sdlc/cmd/conform-to-sdlc

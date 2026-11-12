@@ -50,12 +50,14 @@ linters:
     # Style & correctness
     - asciicheck
     - copyloopvar
+    - dupl
     - dupword
     - durationcheck
     - errname
     - exptostd
     - fatcontext
     - gocheckcompilerdirectives
+    - godoclint
     - gochecknoinits
     - goconst
     - gocritic
@@ -75,6 +77,7 @@ linters:
     - sloglint
     - unconvert
     - unparam
+    - unqueryvet
     - usestdlibvars
     - wastedassign
 
@@ -100,6 +103,9 @@ linters:
       ignore-interface-regexps:
         - IssueSource
     errcheck:
+      # Blank-discards fail too; a deliberate discard names itself:
+      # //nolint:errcheck // reason. Test files are exempt (exclusions below).
+      check-blank: true
       # STRICT (baseline floor): only calls whose dropped error is genuinely
       # discardable — a Close on a read handle, a printer to a known-good
       # writer. Never a path/package blanket.
@@ -123,18 +129,16 @@ linters:
       # bugclasses pack (ccp-sbp, decision nug d7ea466a8172): the ruleguard
       # checker runs the shared machine rules for the recurring cross-repo Go
       # defect classes. Rules live in .golangci-rules/bugclasses.go — a verbatim
-      # copy of the upstream pack, drift-guarded by scripts/check-pack-drift.sh
-      # in strand; beadwatch carries the same copy without the drift script
-      # (bw-ajp scope: the gate, not the drift-check tooling).
+      # copy of the upstream pack, held byte-equal by repo-standard's lint-pack
+      # rule (repair: go tool repo-standard pack sync).
       enabled-checks:
         - ruleguard
       settings:
         ruleguard:
           # ${base-path} = the .golangci.yml directory (golangci-lint v2). The
-          # glob names ONLY bugclasses.go, so rule 2 (raw-state-write, the
-          # opt-in file) stays off — beadwatch hasn't moved durable state to
-          # atomicfile's write path either.
-          rules: "${base-path}/.golangci-rules/bugclasses.go,${base-path}/.golangci-rules/modern.go"
+          # glob names the pack files; optin_rawstatewrite.go (rule 2, raw
+          # write of durable state) is on because go.mod requires atomicfile.
+          rules: "${base-path}/.golangci-rules/bugclasses.go,${base-path}/.golangci-rules/modern.go,${base-path}/.golangci-rules/optin_rawstatewrite.go"
           # Fail the run on rule-compile errors — never silently skip them.
           failOn: dsl
       disabled-checks:
@@ -205,6 +209,12 @@ linters:
       # module. (Renamed from strand's own prefix; same convention.)
       - (^|/)beadwatch-[^/]+/
     rules:
+      # check-blank applies to non-test code only (lintbrush baseline).
+      - path: _test\.go$
+        linters:
+          - errcheck
+        text: Error return value
+        source: '(^|[^A-Za-z0-9_.])_\s*(,\s*[A-Za-z0-9_]+\s*)*(:=|=[^=])|,\s*_\s*(:=|=[^=])'
       # Test files: relax security, complexity, context, and wrapping.
       - linters:
           - gosec
