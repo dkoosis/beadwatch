@@ -6,10 +6,9 @@ include .sandbox/lib/Makefile.cross.mk
 
 .PHONY: help check audit deploy build install lint race fuzz dupe nilcheck deadcode omitempty standard test vet vuln clean
 
-# Tool pins. The checker and the audit tools run at these pins through go run
+# Tool pins. The audit tools run at these pins through go run
 # or npx, so no one installs them by hand. golangci-lint's pin is in
 # .sandbox/project.conf.
-VER := v0.4.0
 OMITEMPTYSCALAR_VER := v0.4.0
 NILAWAY_VER := v0.0.0-20260918162853-acb8859b9031
 GOVULNCHECK_VER := v1.9.0
@@ -61,9 +60,9 @@ check: vet lint test build standard ## Fast gate: vet + lint + test + build + re
 install: ## Install beadwatch to GOPATH/bin
 	go install ./cmd/beadwatch
 
-# Fleet gate: the checker runs at the pinned VER; bumping it is a deliberate PR.
-standard: ## Run repo-standard (fleet checker) against this repo
-	go run github.com/dkoosis/repo-standard/cmd/repo-standard@$(VER)
+# Fleet gate: runs the current repo-standard main, no version pin.
+standard: ## Run the current repo-standard main (fleet checker) against this repo
+	GOPRIVATE=github.com/dkoosis/repo-standard go run github.com/dkoosis/repo-standard/cmd/repo-standard@main
 
 # vuln runs last in audit: govulncheck needs vuln.go.dev, so the other gates report first.
 vuln: ## Scan for known vulnerabilities (govulncheck, pinned)
